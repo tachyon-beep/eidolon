@@ -34,6 +34,7 @@ Make the Refiner loop explicit: states, transitions, data model, APIs, and exit 
 * **RefinementDelta**: proposed changes to Plan boundaries, components, interfaces, risks.
 * **GateCheck**: machine results for compliance/security/interop.
 * **ADR**: decision records linked to deltas and gates.
+* **Rulepack**: shared DSL (see DR-01 §10.1) providing selectors and enforcement modes for GateChecks and Drift.
 
 ## 4. State machine
 
@@ -117,6 +118,8 @@ A DWI is **Implementable** when all are true:
   status: "pass|warn|fail", evidence: [uris...], rulepack_id,
   created_at }
 ```
+
+* GateChecks compile the **Rulepack DSL** referenced in DR-01 §10.1 using the same `rulepack_id` pinned on the DWI. Compiled queries run against CodeGraph snapshots or plan deltas.
 
 ## 9. APIs
 

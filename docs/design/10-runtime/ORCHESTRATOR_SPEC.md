@@ -20,7 +20,7 @@ Owner: Orchestrator Team
 
 ## 1. Purpose
 
-Define a stable, engine‑agnostic adapter contract for submitting, running, tracking, and cancelling Eidolon tasks and jobs across multiple orchestration backends (Local, Airflow, Dagster, Temporal, Argo, Flyte). Provide a conformance test suite and a local reference runner.
+Define a stable, engine‑agnostic adapter contract for submitting, running, tracking, and cancelling Eidolon tasks and jobs across multiple orchestration backends (Local, Airflow, Dagster, Temporal, Argo, Flyte). Provide a conformance test suite and a local reference runner. **v1 targets Local + Temporal; additional adapters remain behind feature flags until they pass the conformance suite and emit required telemetry.**
 
 ## 2. Concepts
 
@@ -147,6 +147,8 @@ Each error carries: `category`, `message`, `details`, `attempt`, `timestamp`.
 * Used for dev and CI; must pass the same conformance suite.
 
 ## 13. Adapter mappings (profiles)
+
+> **Adapter rollout plan**: LocalAdapter and TemporalAdapter are **GA in v1**. The Airflow, Dagster, Argo, and Flyte adapters share the contract below but remain feature-flagged until they pass the full conformance suite and emit OBS-01 telemetry.
 
 ### 13.1 Airflow profile
 

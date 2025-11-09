@@ -140,6 +140,31 @@ mode: block
 autofix: { action: "suggest-facade", message: "Introduce service in app layer" }
 ```
 
+## 10.1 Rulepack DSL (shared contract)
+
+* **Ownership**: jointly by the Refiner team (plan/GateCheck side) and Conformance team (drift enforcement). Published as `rulepack.schema.json`.
+* **Schema**: YAML or JSON document with:
+
+  ```
+  id: RP-2025-11-01
+  version: 1.0.0
+  owners: ["refiner", "conformance"]
+  rules:
+    - id: layering-ui-not-depend-data
+      selector: import from /^ui\./ to /^data\./
+      severity: error
+      enforcement: block
+      autofix: { action: "suggest-facade", message: "Introduce service in app layer" }
+      scopes: ["drift", "gatecheck"]
+  ```
+
+* **Lifecycle**:
+  * Stored in `rulepacks/` with semantic versioning.
+  * Refiner GateChecks compile the same DSL to evaluate proposed plan deltas.
+  * Drift detection uses the compiled selectors to query CodeGraph. Version pinned per run via `rulepack_id`.
+* **Execution interface**: `rulepack.compile(rule_id)` → SQL/Query fragments for CodeGraph; `rulepack.evaluate(delta)` → pass/fail with evidence.
+* **Open issues**: richer selectors (AST, boundary membership), macro support, and multi-tenancy overrides. Track in RP-DSL backlog.
+
 ## 11. CI/PR integration
 
 * GitHub/GitLab status checks reflect drift outcome per run.

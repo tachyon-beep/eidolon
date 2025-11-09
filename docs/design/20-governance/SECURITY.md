@@ -67,7 +67,7 @@ Classes: `PUBLIC`, `INTERNAL`, `CONFIDENTIAL`, `SENSITIVE` (default for source c
 
 * **Disabled**: no LLM calls allowed.
 * **Strict**: only local/self‑hosted endpoints; no external egress; prompts and completions logged internally.
-* **Balanced**: approved managed endpoints; prompts redacted; egress to allow‑listed domains.
+* **Balanced**: approved managed endpoints; prompts redacted; egress to allow‑listed domains. **Product view exception**: tenants may enable a *sanitised Product LLM bridge* that automatically routes Product Owner interactions through Balanced mode with forced redaction/audit while leaving other workflows Disabled/Strict.
 
 ### 6.2 Redaction & prompt hygiene
 
@@ -79,6 +79,7 @@ Classes: `PUBLIC`, `INTERNAL`, `CONFIDENTIAL`, `SENSITIVE` (default for source c
 
 * Domain allow‑list per Tenant; egress default deny.
 * Model card registry with risk labels (PII handling, training retention, region).
+* **Product LLM bridge**: Balanced mode for the Product view requires dedicated allow‑list entries plus automated redaction logs stored under the Product Owner’s tenant. Disablement is a single switch in the Architecture view.
 
 ## 7. Data flows (DFD overview)
 

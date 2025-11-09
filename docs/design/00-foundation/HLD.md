@@ -137,6 +137,7 @@ Eidolon is a modular platform that scans source repositories, builds a code know
 2. LLM teases out structured requirements (Use Cases, NFRs, Risks) into a **RequirementRecord**.
 3. RequirementRecords enter an **Architect Inbox** for review in the Architecture view.
 4. Architect accepts/edits/rejects, links to plan.yaml goals, and schedules refinement.
+> **LLM safety**: Product view calls run through the *sanitised Product LLM bridge* defined in SEC-01. Other workflows remain in Disabled/Strict modes by default.
 
 ## 8. Data model (selected)
 

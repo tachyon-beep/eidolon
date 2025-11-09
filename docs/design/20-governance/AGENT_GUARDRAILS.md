@@ -107,6 +107,8 @@ Every patch includes a **PatchEnvelope**:
   patch_id, agent_class, inputs: {artefact_id, commit_sha, context_digest},
   prompt_pack, tool_versions, determinism: {mode, seed, temp},
   checks: {lint, type, tests},
+  supply_chain: {dependency_changes: [], licences: [], sbom_delta},
+  drift_links: {drift_item_ids: [], boundary_ids: []},
   signature: {signer, signature},
   created_at
 }
@@ -152,6 +154,7 @@ POST /agents/analysis          # run explain/test-gen without write perms
 
 * Agents cannot modify deny‑listed paths; attempts are logged and surfaced.
 * All patches carry valid PatchEnvelope with reproducible inputs (DET‑01 alignment).
+* PatchEnvelope must include SUP‑01 metadata (dependency/licence deltas) and DR‑01 context (linked DriftItems/boundaries) so reviewers have a consolidated guardrail report.
 * Oversized or boundary‑crossing patches require appropriate approvals.
 * Rollback rate under 2% over 30 days in staging; guardrails reduce review time by ≥ 20%.
 

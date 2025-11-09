@@ -48,6 +48,29 @@ QUERIES = {
         FROM file_metrics
         WHERE run_id = %s
     """,
+    "Q7_top_import_targets": """
+        SELECT import_name, COUNT(*) AS usages
+        FROM file_imports
+        WHERE run_id = %s
+        GROUP BY import_name
+        ORDER BY usages DESC
+        LIMIT 50
+    """,
+    "Q8_boundary_stats": """
+        SELECT boundary, module_count, total_sloc, total_functions, total_classes
+        FROM boundary_stats
+        WHERE run_id = %s
+        ORDER BY total_sloc DESC
+        LIMIT 20
+    """,
+    "Q9_top_calls": """
+        SELECT callee_name, COUNT(*) AS call_count
+        FROM function_calls
+        WHERE run_id = %s
+        GROUP BY callee_name
+        ORDER BY call_count DESC
+        LIMIT 50
+    """,
 }
 
 

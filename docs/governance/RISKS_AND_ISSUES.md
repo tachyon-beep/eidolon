@@ -15,7 +15,7 @@ last_updated: 2025-11-10
 
 | ID | Title | Description | Owner | Mitigation/Next Step | Status |
 | --- | --- | --- | --- | --- | --- |
-| R-001 | CodeGraph performance | 5 MLOC target with unresolved artefact IDs/selectors | CodeGraph Lead | Prototype scanner + queries on mid-size repo; validate metrics | Open |
+| R-001 | CodeGraph performance | 5 MLOC target with unresolved artefact IDs/selectors | CodeGraph Lead | Synthetic 10.6 M SLOC + CPython scans ingested; queries/concurrency under p95 <4 ms; rename stability validated | Closed |
 | R-002 | Rulepack DSL gap | Policy DSL referenced but not fully specified | Refiner + Drift Leads | Finalise schema + compiler (see DR-01 §10.1) | Mitigating |
 | R-003 | Orchestrator matrix | Supporting 6 adapters inflates QA/scope | Orchestrator Team | v1 limited to Local + Temporal; others feature-flagged | Mitigating |
 | R-004 | Product LLM vs SEC defaults | Product view depends on LLM while tenants default to Disabled | Security + Product | Sanitised bridge documented; deliver redaction/audit path before enabling | In progress |

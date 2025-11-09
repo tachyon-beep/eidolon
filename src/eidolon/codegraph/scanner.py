@@ -19,6 +19,7 @@ EXCLUDED_DIRS: tuple[str, ...] = (".git", ".hg", ".svn", "__pycache__", ".venv",
 @dataclass(slots=True)
 class FileMetrics:
     path: str
+    package: str
     sha256: str
     size_bytes: int
     sloc: int
@@ -26,6 +27,9 @@ class FileMetrics:
     function_count: int
     import_count: int
     parse_ms: float
+    imports: list[str]
+    functions: list[str]
+    calls: list[str]
 
 
 @dataclass(slots=True)
@@ -164,16 +168,33 @@ class CodeGraphScanner:
         class_count = 0
         function_count = 0
         import_count = 0
+        imports: list[str] = []
+        functions: list[str] = []
+        calls: list[str] = []
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef):
                 class_count += 1
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 function_count += 1
+                functions.append(node.name)
             elif isinstance(node, (ast.Import, ast.ImportFrom)):
                 import_count += 1
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        imports.append(alias.name)
+                else:
+                    module = node.module or ""
+                    imports.append(module)
+            elif isinstance(node, ast.Call):
+                callee = _call_name(node.func)
+                if callee:
+                    calls.append(callee)
 
+        rel_path = str(path.relative_to(self.repo_root))
+        package = rel_path.split("/", 1)[0] if "/" in rel_path else rel_path
         return FileMetrics(
-            path=str(path.relative_to(self.repo_root)),
+            path=rel_path,
+            package=package,
             sha256=sha256,
             size_bytes=size_bytes,
             sloc=sloc,
@@ -181,6 +202,9 @@ class CodeGraphScanner:
             function_count=function_count,
             import_count=import_count,
             parse_ms=parse_ms,
+            imports=imports,
+            functions=functions,
+            calls=calls,
         )
 
 
@@ -209,3 +233,14 @@ def _diff_disk_counters(
     write_bytes = max(0, end.write_bytes - start.write_bytes)
     mb = 1024 * 1024
     return read_bytes / mb, write_bytes / mb
+
+
+def _call_name(node: ast.AST) -> Optional[str]:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        root = _call_name(node.value)
+        if root:
+            return f"{root}.{node.attr}"
+        return node.attr
+    return None

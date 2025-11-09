@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Iterable
 
 import psycopg
-from psycopg import sql
+from psycopg import Cursor
 
 DEFAULT_DSN = "postgresql://eidolon:password@localhost:6543/eidolon"
 
@@ -25,6 +25,7 @@ SCHEMA_STATEMENTS = (
         id SERIAL PRIMARY KEY,
         run_id INTEGER NOT NULL REFERENCES scan_runs(id) ON DELETE CASCADE,
         path TEXT NOT NULL,
+        boundary TEXT NOT NULL,
         sha256 CHAR(64) NOT NULL,
         size_bytes BIGINT NOT NULL,
         sloc INTEGER NOT NULL,
@@ -32,6 +33,62 @@ SCHEMA_STATEMENTS = (
         function_count INTEGER NOT NULL,
         import_count INTEGER NOT NULL,
         parse_ms DOUBLE PRECISION NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS file_imports (
+        run_id INTEGER NOT NULL REFERENCES scan_runs(id) ON DELETE CASCADE,
+        path TEXT NOT NULL,
+        import_name TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_file_imports_run_path
+        ON file_imports(run_id, path)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS function_defs (
+        run_id INTEGER NOT NULL REFERENCES scan_runs(id) ON DELETE CASCADE,
+        path TEXT NOT NULL,
+        function_name TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_function_defs_run_path
+        ON function_defs(run_id, path)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS function_calls (
+        run_id INTEGER NOT NULL REFERENCES scan_runs(id) ON DELETE CASCADE,
+        path TEXT NOT NULL,
+        callee_name TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_function_calls_run_path
+        ON function_calls(run_id, path)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS import_edges (
+        run_id INTEGER NOT NULL REFERENCES scan_runs(id) ON DELETE CASCADE,
+        source_boundary TEXT NOT NULL,
+        target_name TEXT NOT NULL,
+        usage_count INTEGER NOT NULL
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_import_edges_run_source
+        ON import_edges(run_id, source_boundary)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS boundary_stats (
+        run_id INTEGER NOT NULL REFERENCES scan_runs(id) ON DELETE CASCADE,
+        boundary TEXT NOT NULL,
+        module_count INTEGER NOT NULL,
+        total_sloc BIGINT NOT NULL,
+        total_functions BIGINT NOT NULL,
+        total_classes BIGINT NOT NULL,
+        PRIMARY KEY (run_id, boundary)
     )
     """,
     """
@@ -92,13 +149,17 @@ def insert_run(conn: psycopg.Connection, repo_root: str, summary: dict) -> int:
 
 
 def insert_file_metrics(conn: psycopg.Connection, run_id: int, records: Iterable[dict[str, object]], batch_size: int = 1000) -> None:
-    rows = []
+    metric_rows = []
+    import_rows = []
+    function_rows = []
+    call_rows = []
     with conn.cursor() as cur:
         for record in records:
-            rows.append(
+            metric_rows.append(
                 (
                     run_id,
                     record["path"],
+                    record.get("package", record["path"].split("/", 1)[0]),
                     record["sha256"],
                     int(record["size_bytes"]),
                     int(record["sloc"]),
@@ -108,28 +169,75 @@ def insert_file_metrics(conn: psycopg.Connection, run_id: int, records: Iterable
                     float(record["parse_ms"]),
                 )
             )
-            if len(rows) >= batch_size:
-                cur.executemany(
-                    """
-                    INSERT INTO file_metrics (
-                        run_id, path, sha256, size_bytes, sloc,
-                        class_count, function_count, import_count, parse_ms
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                    """,
-                    rows,
-                )
-                rows.clear()
-        if rows:
-            cur.executemany(
-                """
-                INSERT INTO file_metrics (
-                    run_id, path, sha256, size_bytes, sloc,
-                    class_count, function_count, import_count, parse_ms
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                """,
-                rows,
-            )
+            for import_name in record.get("imports", []):
+                import_rows.append((run_id, record["path"], import_name))
+            for fn_name in record.get("functions", []):
+                function_rows.append((run_id, record["path"], fn_name))
+            for call_name in record.get("calls", []):
+                call_rows.append((run_id, record["path"], call_name))
+            if len(metric_rows) >= batch_size:
+                _flush_metrics(cur, metric_rows)
+                metric_rows.clear()
+            if len(import_rows) >= batch_size:
+                _flush_imports(cur, import_rows)
+                import_rows.clear()
+            if len(function_rows) >= batch_size:
+                _flush_functions(cur, function_rows)
+                function_rows.clear()
+            if len(call_rows) >= batch_size:
+                _flush_calls(cur, call_rows)
+                call_rows.clear()
+        if metric_rows:
+            _flush_metrics(cur, metric_rows)
+        if import_rows:
+            _flush_imports(cur, import_rows)
+        if function_rows:
+            _flush_functions(cur, function_rows)
+        if call_rows:
+            _flush_calls(cur, call_rows)
     conn.commit()
+
+
+def _flush_metrics(cur: psycopg.Cursor, rows: list[tuple]) -> None:
+    cur.executemany(
+        """
+        INSERT INTO file_metrics (
+            run_id, path, boundary, sha256, size_bytes, sloc,
+            class_count, function_count, import_count, parse_ms
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """,
+        rows,
+    )
+
+
+def _flush_imports(cur: psycopg.Cursor, rows: list[tuple]) -> None:
+    cur.executemany(
+        """
+        INSERT INTO file_imports (run_id, path, import_name)
+        VALUES (%s,%s,%s)
+        """,
+        rows,
+    )
+
+
+def _flush_functions(cur: psycopg.Cursor, rows: list[tuple]) -> None:
+    cur.executemany(
+        """
+        INSERT INTO function_defs (run_id, path, function_name)
+        VALUES (%s,%s,%s)
+        """,
+        rows,
+    )
+
+
+def _flush_calls(cur: psycopg.Cursor, rows: list[tuple]) -> None:
+    cur.executemany(
+        """
+        INSERT INTO function_calls (run_id, path, callee_name)
+        VALUES (%s,%s,%s)
+        """,
+        rows,
+    )
 
 
 def summary_from_file(path: Path | None) -> dict | None:
@@ -152,7 +260,50 @@ def main() -> None:
         ensure_schema(conn)
         run_id = insert_run(conn, repo_root, summary)
         insert_file_metrics(conn, run_id, load_records(records_path), batch_size=args.batch)
+        build_import_edges(conn, run_id)
+        build_boundary_stats(conn, run_id)
         print(f"Inserted run {run_id} with records from {records_path}")
+
+
+def build_import_edges(conn: psycopg.Connection, run_id: int) -> None:
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM import_edges WHERE run_id = %s", (run_id,))
+        cur.execute(
+            """
+            INSERT INTO import_edges (run_id, source_boundary, target_name, usage_count)
+            SELECT %s AS run_id,
+                   fm.boundary AS source_boundary,
+                   split_part(fi.import_name, '.', 1) AS target_name,
+                   COUNT(*) AS usage_count
+            FROM file_imports fi
+            JOIN file_metrics fm ON fm.run_id = fi.run_id AND fm.path = fi.path
+            WHERE fi.run_id = %s
+            GROUP BY fm.boundary, split_part(fi.import_name, '.', 1)
+            """,
+            (run_id, run_id),
+        )
+    conn.commit()
+
+
+def build_boundary_stats(conn: psycopg.Connection, run_id: int) -> None:
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM boundary_stats WHERE run_id = %s", (run_id,))
+        cur.execute(
+            """
+            INSERT INTO boundary_stats (run_id, boundary, module_count, total_sloc, total_functions, total_classes)
+            SELECT %s AS run_id,
+                   boundary,
+                   COUNT(*) AS module_count,
+                   SUM(sloc) AS total_sloc,
+                   SUM(function_count) AS total_functions,
+                   SUM(class_count) AS total_classes
+            FROM file_metrics
+            WHERE run_id = %s
+            GROUP BY boundary
+            """,
+            (run_id, run_id),
+        )
+    conn.commit()
 
 
 if __name__ == "__main__":  # pragma: no cover

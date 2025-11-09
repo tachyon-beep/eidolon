@@ -1,3 +1,16 @@
+---
+id: AGT-01
+version: 0.1
+owner: Evaluator Team / Security Lead
+status: draft
+summary: Guardrail policy defining agent capabilities, path permissions, patch limits, sandboxing, approval flow, and telemetry ties across Eidolon.
+tags:
+  - governance
+  - guardrails
+  - security
+last_updated: 2025-11-10
+---
+
 # Eidolon – Agent Guardrails & Permissions (AGT‑01)
 
 Version: 0.1

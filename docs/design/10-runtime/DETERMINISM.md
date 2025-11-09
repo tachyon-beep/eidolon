@@ -1,4 +1,18 @@
 # Eidolon – Determinism & Evaluator Flakiness (DET‑01)
+---
+id: DET-01
+version: 0.1
+owner: Evaluator Team Lead
+status: draft
+summary: Determinism modes, manifests, variance controls, replay tooling, and flakiness management for Eidolon evaluators.
+tags:
+  - runtime
+  - determinism
+  - evaluators
+last_updated: 2025-11-10
+---
+
+# Eidolon – Determinism & Evaluator Flakiness (DET‑01)
 
 Version: 0.1
 Date: 10 Nov 2025

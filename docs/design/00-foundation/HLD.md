@@ -1,3 +1,16 @@
+---
+id: HLD
+version: 1.0
+owner: Architecture Team
+status: draft
+summary: End-to-end high level design for Eidolon covering context, containers, components, workflows, data models, interfaces, and risks.
+tags:
+  - foundation
+  - architecture
+  - hld
+last_updated: 2025-11-10
+---
+
 # Eidolon – High Level Design (HLD)
 
 Version: 1.0
@@ -42,7 +55,7 @@ Eidolon is a modular platform that scans source repositories, builds a code know
 * **Eidolon API Gateway**: REST and WebSocket entry point. AuthN via OIDC, AuthZ via RBAC. Rate limiting and audit logging.
 * **Control Plane**: run planner and dispatcher, policies, scheduling requests to the chosen orchestrator.
 * **Worker Runtime**: task executors that run scanners, evaluators, and synthesis tasks. Packaged as containers.
-* **Orchestrator Adapter**: glue for Airflow, Dagster, Temporal, Argo, or Flyte.
+* **Orchestrator Adapter**: glue for orchestration engines. **v1 ships Local + Temporal**, with Airflow/Dagster/Argo/Flyte behind feature flags until conformance + telemetry mature.
 * **Metadata Store**: relational DB for runs, artefacts, policies, RBAC, and approvals.
 * **Object Store**: immutable blobs for snapshots, JSONL results, diagrams, and SBOMs.
 * **Search and Index**: optional OpenSearch for full text queries over findings and docs.
@@ -70,10 +83,12 @@ Eidolon is a modular platform that scans source repositories, builds a code know
 
 ### 6.3 Orchestrator Adapter
 
-* **AirflowAdapter**: DAG generation and task submission
-* **DagsterAdapter**: asset jobs and partitions
-* **TemporalAdapter**: durable workflows and activities
-* **ArgoFlyteAdapter**: K8s templates and type safe tasks
+* **LocalAdapter**: developer workstation/default CI runner (always on)
+* **TemporalAdapter**: durable workflows and activities (**primary cloud target for v1**)
+* **AirflowAdapter**: DAG generation and task submission (feature-flag)
+* **DagsterAdapter**: asset jobs and partitions (feature-flag)
+* **ArgoAdapter**: orchestrates K8s DAG/Step workflows via Argo templates (feature-flag)
+* **FlyteAdapter**: manages strongly typed tasks, launch plans, and registries (feature-flag)
 
 ### 6.4 Data and Storage
 

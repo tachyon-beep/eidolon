@@ -1,3 +1,16 @@
+---
+id: RF-01
+version: 0.1
+owner: Architecture Lead
+status: draft
+summary: Refiner loop state machine, artefacts, gate checks, and APIs for moving DWIs from New to Implementable.
+tags:
+  - foundation
+  - workflow
+  - planning
+last_updated: 2025-11-10
+---
+
 # Eidolon – Refiner Workflow v1 (RF‑01)
 
 Version: 0.1

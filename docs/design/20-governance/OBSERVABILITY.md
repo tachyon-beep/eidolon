@@ -1,3 +1,16 @@
+---
+id: OBS-01
+version: 0.1
+owner: Platform Observability Lead
+status: draft
+summary: Observability stack, metrics taxonomy, dashboards, and SLO policy for Eidolon with role-specific telemetry views.
+tags:
+  - observability
+  - slo
+  - governance
+last_updated: 2025-11-10
+---
+
 # Eidolon – Observability & SLOs (OBS‑01)
 
 Version: 0.1

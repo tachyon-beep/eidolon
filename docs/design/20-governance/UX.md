@@ -1,3 +1,16 @@
+---
+id: UX-02
+version: 0.1
+owner: Front-End Lead
+status: draft
+summary: Vue console resilience plan covering offline behaviour, error handling, accessibility, and telemetry integration.
+tags:
+  - ux
+  - resilience
+  - governance
+last_updated: 2025-11-10
+---
+
 # Eidolon – Console Resilience & UX (UX‑02)
 
 Version: 0.1

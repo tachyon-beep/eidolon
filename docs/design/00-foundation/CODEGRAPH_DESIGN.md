@@ -1,3 +1,16 @@
+---
+id: CG-01
+version: 0.1
+owner: Control Plane Lead
+status: draft
+summary: CodeGraph schema, storage, scanning strategy, and acceptance criteria optimised for Python-focused repositories.
+tags:
+  - foundation
+  - codegraph
+  - data
+last_updated: 2025-11-10
+---
+
 # Eidolon – CodeGraph v1 Design Spike (CG‑01)
 
 Version: 0.1

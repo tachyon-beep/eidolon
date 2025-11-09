@@ -1,3 +1,16 @@
+---
+id: DATA-01
+version: 0.1
+owner: Data Lead
+status: draft
+summary: Unified data model, ERD, retention, and governance rules for Eidolon metadata, artefacts, and telemetry stores.
+tags:
+  - foundation
+  - data
+  - governance
+last_updated: 2025-11-10
+---
+
 # Eidolon – Data Model Hardening & Retention (DATA‑01)
 
 Version: 0.1
@@ -146,6 +159,175 @@ CREATE TABLE provenance (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(subject_type, subject_id)
 );
+```
+
+### 4.5 API tokens
+
+```sql
+CREATE TABLE api_tokens (
+  token_id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+  user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+  hashed_token TEXT NOT NULL,
+  scopes TEXT[] NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  last_used_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by UUID REFERENCES users(user_id),
+  rotated_from UUID REFERENCES api_tokens(token_id)
+);
+CREATE INDEX idx_tokens_tenant_user ON api_tokens(tenant_id, user_id);
+CREATE INDEX idx_tokens_expires ON api_tokens(expires_at);
+```
+
+### 4.6 Service Level Objectives / Agreements
+
+```sql
+CREATE TABLE slos (
+  slo_id UUID PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+  name TEXT NOT NULL UNIQUE,
+  metric TEXT NOT NULL,
+  target_pct NUMERIC(5,2) NOT NULL,
+  window_days INT NOT NULL,
+  description TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE sla_commitments (
+  sla_id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+  slo_id UUID NOT NULL REFERENCES slos(slo_id) ON DELETE CASCADE,
+  policy_id UUID REFERENCES policies(policy_id) ON DELETE SET NULL,
+  breach_action TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+### 4.7 Referential integrity & indexes
+
+To meet the “strong referential integrity” principle, apply the following constraints (table names match §4.1–4.6 and the ERD entities):
+
+```sql
+ALTER TABLE repos
+  ADD CONSTRAINT repos_project_fk
+  FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE;
+
+ALTER TABLE users
+  ADD CONSTRAINT users_tenant_fk
+  FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE;
+
+ALTER TABLE runs
+  ADD CONSTRAINT runs_repo_fk
+  FOREIGN KEY (repo_id) REFERENCES repos(repo_id) ON DELETE RESTRICT,
+  ADD CONSTRAINT runs_plan_fk
+  FOREIGN KEY (plan_id) REFERENCES plans(plan_id) ON DELETE SET NULL;
+
+ALTER TABLE tasks
+  ADD CONSTRAINT tasks_run_fk
+  FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE;
+
+ALTER TABLE artifacts
+  ADD CONSTRAINT artifacts_run_fk
+  FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE,
+  ADD CONSTRAINT artifacts_task_fk
+  FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE SET NULL;
+
+ALTER TABLE artefacts
+  ADD CONSTRAINT artefacts_repo_fk
+  FOREIGN KEY (repo_id) REFERENCES repos(repo_id) ON DELETE CASCADE;
+
+ALTER TABLE edges_imports
+  ADD CONSTRAINT edges_imports_src_fk
+  FOREIGN KEY (src_id) REFERENCES artefacts(artefact_id) ON DELETE CASCADE,
+  ADD CONSTRAINT edges_imports_dst_fk
+  FOREIGN KEY (dst_id) REFERENCES artefacts(artefact_id) ON DELETE CASCADE;
+
+ALTER TABLE edges_contains
+  ADD CONSTRAINT edges_contains_parent_fk
+  FOREIGN KEY (parent_id) REFERENCES artefacts(artefact_id) ON DELETE CASCADE,
+  ADD CONSTRAINT edges_contains_child_fk
+  FOREIGN KEY (child_id) REFERENCES artefacts(artefact_id) ON DELETE CASCADE;
+
+ALTER TABLE boundaries
+  ADD CONSTRAINT boundaries_project_fk
+  FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE;
+
+ALTER TABLE maps_to_boundary
+  ADD CONSTRAINT maps_to_boundary_art_fk
+  FOREIGN KEY (artefact_id) REFERENCES artefacts(artefact_id) ON DELETE CASCADE,
+  ADD CONSTRAINT maps_to_boundary_boundary_fk
+  FOREIGN KEY (boundary_id) REFERENCES boundaries(boundary_id) ON DELETE CASCADE;
+
+ALTER TABLE evaluation_records
+  ADD CONSTRAINT eval_run_fk
+  FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE,
+  ADD CONSTRAINT eval_artefact_fk
+  FOREIGN KEY (artefact_id) REFERENCES artefacts(artefact_id) ON DELETE SET NULL;
+
+ALTER TABLE drift_items
+  ADD CONSTRAINT drift_repo_fk
+  FOREIGN KEY (repo_id) REFERENCES repos(repo_id) ON DELETE CASCADE;
+
+ALTER TABLE waivers
+  ADD CONSTRAINT waivers_drift_fk
+  FOREIGN KEY (drift_id) REFERENCES drift_items(drift_id) ON DELETE CASCADE,
+  ADD CONSTRAINT waivers_approver_fk
+  FOREIGN KEY (approver) REFERENCES users(user_id) ON DELETE RESTRICT;
+
+ALTER TABLE designworkitems
+  ADD CONSTRAINT dwi_plan_fk
+  FOREIGN KEY (plan_id) REFERENCES plans(plan_id) ON DELETE CASCADE;
+
+ALTER TABLE refinementdeltas
+  ADD CONSTRAINT delta_dwi_fk
+  FOREIGN KEY (dwi_id) REFERENCES designworkitems(dwi_id) ON DELETE CASCADE;
+
+ALTER TABLE requirements
+  ADD CONSTRAINT req_project_fk
+  FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE;
+
+ALTER TABLE policies
+  ADD CONSTRAINT policies_tenant_fk
+  FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE;
+
+ALTER TABLE budgets
+  ADD CONSTRAINT budgets_tenant_fk
+  FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE;
+
+ALTER TABLE api_tokens
+  ADD CONSTRAINT tokens_tenant_fk
+  FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+  ADD CONSTRAINT tokens_user_fk
+  FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE SET NULL,
+  ADD CONSTRAINT tokens_rotated_fk
+  FOREIGN KEY (rotated_from) REFERENCES api_tokens(token_id) ON DELETE SET NULL,
+  ADD CONSTRAINT tokens_creator_fk
+  FOREIGN KEY (created_by) REFERENCES users(user_id) ON DELETE SET NULL;
+
+ALTER TABLE slos
+  ADD CONSTRAINT slos_tenant_fk
+  FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE;
+
+ALTER TABLE sla_commitments
+  ADD CONSTRAINT sla_tenant_fk
+  FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+  ADD CONSTRAINT sla_slo_fk
+  FOREIGN KEY (slo_id) REFERENCES slos(slo_id) ON DELETE CASCADE,
+  ADD CONSTRAINT sla_policy_fk
+  FOREIGN KEY (policy_id) REFERENCES policies(policy_id) ON DELETE SET NULL;
+```
+
+Recommended supporting indexes for the hottest joins/lookups:
+
+```sql
+CREATE INDEX idx_tasks_run ON tasks(run_id);
+CREATE INDEX idx_artifacts_run_task ON artifacts(run_id, task_id);
+CREATE INDEX idx_eval_run_art ON evaluation_records(run_id, artefact_id);
+CREATE INDEX idx_maps_boundary ON maps_to_boundary(boundary_id, artefact_id);
+CREATE INDEX idx_edges_imports_dst ON edges_imports(dst_id);
+CREATE INDEX idx_sla_tenant ON sla_commitments(tenant_id);
+CREATE INDEX idx_slo_metric ON slos(metric);
 ```
 
 ## 5. JSON Schemas (abridged)

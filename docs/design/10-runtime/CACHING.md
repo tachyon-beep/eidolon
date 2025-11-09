@@ -1,4 +1,18 @@
 # Eidolon – Caching & Cost Governance (CASH‑01)
+---
+id: CASH-01
+version: 0.1
+owner: Platform Lead
+status: draft
+summary: Unified caching and cost governance model covering keys, TTLs, invalidation, budgets, and telemetry across Eidolon runs.
+tags:
+  - runtime
+  - caching
+  - cost
+last_updated: 2025-11-10
+---
+
+# Eidolon – Caching & Cost Governance (CASH‑01)
 
 Version: 0.1
 Date: 10 Nov 2025

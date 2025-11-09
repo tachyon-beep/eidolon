@@ -1,4 +1,18 @@
 # Eidolon – Orchestrator Adapter Spec (ORCH‑01)
+---
+id: ORCH-01
+version: 0.1
+owner: Orchestrator Team
+status: draft
+summary: Engine-agnostic adapter contract for submitting, running, tracking, cancelling, and testing Eidolon tasks across orchestration backends.
+tags:
+  - runtime
+  - orchestrator
+  - spec
+last_updated: 2025-11-10
+---
+
+# Eidolon – Orchestrator Adapter Spec (ORCH‑01)
 
 Version: 0.1
 Date: 10 Nov 2025
@@ -152,13 +166,17 @@ Each error carries: `category`, `message`, `details`, `attempt`, `timestamp`.
 
 ### 13.4 Argo Workflows profile
 
-* JobSpec → WorkflowTemplate; TaskSpec → template + step/DAG.
-* Heartbeats via sidecar; cancellation via workflow terminate; logs via Argo logs API.
+* Map JobSpec to Argo DAG/Steps templates; tasks reference reusable container specs.
+* Pass artefacts via template outputs/parameters; heartbeat via a sidecar container emitting heartbeats to Control Plane.
+* Cancellation handled through workflow terminate; adapters reconcile final state and ensure no further writes after termination.
+* Limitations: queue timeouts approximated with `activeDeadlineSeconds` + sensors.
 
 ### 13.5 Flyte profile
 
-* JobSpec → Flyte workflow; tasks as container tasks.
-* Use resource requests/limits; cancellation via abort; artefacts via Flyte offloads.
+* JobSpec compiles into strongly typed Flyte tasks/launch plans with interface validation and versioned registration.
+* Artifacts exchange via Flyte’s typed inputs/outputs; runtime enforces schema and raises typed errors on mismatch.
+* Cancellation via Flyte abort; adapters surface typed I/O validation errors as `UserCodeError`.
+* Registry sync required before submission to ensure launch plans exist with correct versions/resources.
 
 ## 14. Cache integration
 

@@ -1,4 +1,18 @@
 # Eidolon – Drift Detection & Reconciliation (DR‑01)
+---
+id: DR-01
+version: 0.1
+owner: Conformance Lead
+status: draft
+summary: Drift detection pipeline, data model, UX flows, enforcement modes, and APIs aligning plan intent with code reality.
+tags:
+  - runtime
+  - drift
+  - conformance
+last_updated: 2025-11-10
+---
+
+# Eidolon – Drift Detection & Reconciliation (DR‑01)
 
 Version: 0.1
 Date: 10 Nov 2025

@@ -1,3 +1,16 @@
+---
+id: INT-01
+version: 0.1
+owner: Integrations Lead
+status: draft
+summary: Integration contract covering provider adapters, webhooks, outbound actions, degraded modes, and telemetry for Eidolon.
+tags:
+  - runtime
+  - integrations
+  - contracts
+last_updated: 2025-11-10
+---
+
 # Eidolon – Integration Contracts (INT‑01)
 
 Version: 0.1

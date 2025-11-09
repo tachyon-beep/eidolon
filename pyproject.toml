@@ -1,0 +1,17 @@
+[project]
+name = "eidolon"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "John Morrissey", email = "544926+tachyon-beep@users.noreply.github.com" }
+]
+requires-python = ">=3.13"
+dependencies = []
+
+[project.scripts]
+eidolon = "eidolon:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

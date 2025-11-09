@@ -7,10 +7,21 @@ authors = [
     { name = "John Morrissey", email = "544926+tachyon-beep@users.noreply.github.com" }
 ]
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "psutil>=6.0.0",
+    "psycopg[binary]>=3.2",
+    "psycopg-pool>=3.2",
+]
 
 [project.scripts]
 eidolon = "eidolon:main"
+eidolon-codegraph-scan = "eidolon.codegraph.cli:main"
+eidolon-synthesize-repo = "eidolon.codegraph.generator:main"
+eidolon-codegraph-ingest = "eidolon.codegraph.ingest:main"
+eidolon-codegraph-query-bench = "eidolon.codegraph.queries:main"
+eidolon-synthetic-rename = "eidolon.codegraph.rename:main"
+eidolon-codegraph-compare = "eidolon.codegraph.compare:main"
+eidolon-codegraph-query-concurrency = "eidolon.codegraph.query_concurrency:main"
 
 [build-system]
 requires = ["hatchling"]

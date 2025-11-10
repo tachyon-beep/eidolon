@@ -1,0 +1,6 @@
+tenant: demo-tenant
+required_regions:
+  - ap-southeast-2
+preferred_regions:
+  - ap-southeast-2
+fallback: block

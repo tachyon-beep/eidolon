@@ -1,0 +1,51 @@
+name: Orchestrator With Rulepack
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  orchestrator:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: eidolon
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d eidolon"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v2
+      - name: Install dependencies
+        run: uv sync
+      - name: Run orchestrator with rulepack pipeline
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/eidolon
+        run: |
+          uv run eidolon-orchestrator-run \
+            --job examples/orchestrator/job.yaml \
+            --tenant-policy examples/orchestrator/tenant_policy.yaml \
+            --pools examples/orchestrator/pools.yaml \
+            --repo demo-repo \
+            --repo-path . \
+            --run-id ci-${{ github.run_id }} \
+            --rulepack rulepacks/layering-core/rulepack.yaml \
+            --pipeline-dsn "$DATABASE_URL" \
+            --pipeline-changed-path "src/**/*.py" \
+            --output orchestrator_output.json
+      - name: Enforce rulepack status
+        run: uv run eidolon-rulepack-status orchestrator_output.json --strict
+      - name: Upload orchestrator output
+        uses: actions/upload-artifact@v4
+        with:
+          name: orchestrator-output
+          path: orchestrator_output.json

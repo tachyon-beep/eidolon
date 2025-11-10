@@ -2,7 +2,7 @@
 id: RAPID-TASKSPEC-RESIDENCY
 version: 0.1
 owner: Orchestrator & Security Leads
-status: draft
+status: done
 summary: Rapid design for propagating tenant residency policies into ORCH-01 TaskSpecs and scheduler placement.
 tags:
   - rapid-design
@@ -72,6 +72,6 @@ SEC-01 enforces region pinning per tenant, but ORCH-01 TaskSpec lacks fields to 
 * Local + Temporal adapters honour residency settings in integration tests.
 * Audit trail shows placement + policy compliance per task.
 
-> **Implementation note (2025-02)**: ORCH-01 now carries the `policy.residency` block and documents enforcement semantics
-> (see `docs/design/10-runtime/ORCHESTRATOR_SPEC.md` + `docs/design/10-runtime/TASKSPEC_RESIDENCY.md`). Scheduler + adapter
-> work remains to wire these fields into runtime placement, but the schema + audit contract are defined.
+> **Implementation note (2025-02)**: ORCH-01 now carries the `policy.residency` block and the prototype Control Plane assembles
+> TaskSpecs with tenant policies, persists jobs, and records placements (`.orchestrator/placements.jsonl`). Scheduler + adapters
+> enforce residency/fallbacks and emit telemetry; remaining work is wiring these pieces into the production Control Plane APIs.

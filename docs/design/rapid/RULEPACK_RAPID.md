@@ -50,8 +50,12 @@ HLD/RF/DR specs assume a unified Rulepack DSL, but no executable form exists tod
 > `... publish <path>` to emit the JSON artefact aligned with this plan, `... eval <path> --run-id <id>` to execute the
 > pack against a `scan_runs.id`, `uv run eidolon-rulepack-drift --rulepack <path> (--run-id|--repo-root)` to run the
 > DR-01 drift job wiring, and `uv run eidolon-rulepack-gatecheck --rulepack <path> (--run-id|--repo-root)` (with optional
-> `--changed-path/--changed-boundary` filters) to simulate RF-01 GateChecks over proposed plan deltas. Canonical packs
-> live under `rulepacks/` (e.g., `rulepacks/layering-core`, `rulepacks/security-call-ban`).
+> `--changed-path/--changed-boundary` filters) to simulate RF-01 GateChecks over proposed plan deltas. `uv run eidolon-rulepack-pipeline`
+> ties scanner → ingest → drift/gate wiring together for end-to-end verification. Canonical packs live under `rulepacks/`
+> (e.g., `rulepacks/layering-core`, `rulepacks/security-call-ban`).
+> `.github/workflows/orchestrator-rulepack.yml` demonstrates how to run the orchestrator prototype together with the rulepack
+> pipeline in CI so every push exercises DR-01/RF-01 automatically. The workflow now gates on `uv run eidolon-rulepack-status`
+> to fail when drift or GateChecks block a change.
 
 ## 6. Metrics & Exit Criteria
 - Compiler passes unit tests covering ≥5 canonical rules.

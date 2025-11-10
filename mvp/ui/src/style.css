@@ -1,0 +1,127 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-900 antialiased;
+  }
+
+  * {
+    @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2;
+  }
+}
+
+@layer components {
+  .severity-dot {
+    @apply w-3 h-3 rounded-full inline-block;
+  }
+
+  .severity-dot.critical {
+    @apply bg-severity-critical;
+  }
+
+  .severity-dot.high {
+    @apply bg-severity-high;
+  }
+
+  .severity-dot.medium {
+    @apply bg-severity-medium;
+  }
+
+  .severity-dot.low {
+    @apply bg-severity-low;
+  }
+
+  .status-dot {
+    @apply w-2.5 h-2.5 rounded-full inline-block;
+  }
+
+  .status-dot.queued {
+    @apply bg-status-queued;
+  }
+
+  .status-dot.analyzing {
+    @apply bg-status-analyzing animate-pulse;
+  }
+
+  .status-dot.complete {
+    @apply bg-status-complete;
+  }
+
+  .status-dot.failed {
+    @apply bg-status-failed;
+  }
+
+  .card {
+    @apply bg-white rounded-lg shadow-sm border border-gray-200;
+  }
+
+  .card-hover {
+    @apply transition-all duration-200 hover:shadow-md hover:border-gray-300 cursor-pointer;
+  }
+
+  .btn {
+    @apply px-4 py-2 rounded-lg font-medium transition-colors duration-200;
+  }
+
+  .btn-primary {
+    @apply btn bg-primary text-white hover:bg-purple-700;
+  }
+
+  .btn-secondary {
+    @apply btn bg-gray-200 text-gray-800 hover:bg-gray-300;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .badge-critical {
+    @apply badge bg-bg-critical text-severity-critical;
+  }
+
+  .badge-high {
+    @apply badge bg-bg-high text-severity-high;
+  }
+
+  .badge-medium {
+    @apply badge bg-bg-medium text-severity-medium;
+  }
+
+  .badge-low {
+    @apply badge bg-bg-low text-severity-low;
+  }
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-gray-100;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-400;
+}
+
+/* Animations */
+@keyframes message-flow {
+  0% {
+    stroke-dashoffset: 100;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.message-flow-animation {
+  animation: message-flow 2s linear infinite;
+}

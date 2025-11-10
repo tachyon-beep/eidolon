@@ -1,0 +1,9 @@
+apiVersion: 1
+
+dashboardProviders:
+  - name: default
+    orgId: 1
+    folder: Observability
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards

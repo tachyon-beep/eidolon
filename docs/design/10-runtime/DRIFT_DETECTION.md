@@ -162,7 +162,7 @@ autofix: { action: "suggest-facade", message: "Introduce service in app layer" }
   * Stored in `rulepacks/` with semantic versioning.
   * Refiner GateChecks compile the same DSL to evaluate proposed plan deltas.
   * Drift detection uses the compiled selectors to query CodeGraph. Version pinned per run via `rulepack_id`.
-* **Execution interface**: `rulepack.compile(rule_id)` → SQL/Query fragments for CodeGraph; `rulepack.evaluate(delta)` → pass/fail with evidence.
+* **Execution interface**: `rulepack.compile(rule_id)` → SQL/Query fragments for CodeGraph; `rulepack.evaluate(delta)` → pass/fail with evidence. The prototype pipeline (`uv run eidolon-rulepack-pipeline`) wires scanner → ingest → drift/gate evaluation for local testing.
 * **Open issues**: richer selectors (AST, boundary membership), macro support, and multi-tenancy overrides. Track in RP-DSL backlog.
 
 ## 11. CI/PR integration

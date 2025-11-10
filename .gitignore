@@ -3,5 +3,5 @@ __pycache__/
 *.pyc
 benchmarks/*
 postgres-data/
-
+node_modules/
 .env

@@ -1,0 +1,11 @@
+id: sample-job
+name: sample-job
+max_parallelism: 5
+tasks:
+  - id: sample-task
+    name: sample-task
+    image: eidolon/worker:demo
+    command: ["python", "-c", "print('hello orchestrator')"]
+    policy:
+      egress: deny
+      network_profile: restricted

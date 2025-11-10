@@ -1,0 +1,11 @@
+groups:
+  - name: residency-alerts
+    rules:
+      - alert: ResidencyFallbackBlock
+        expr: sum_over_time(residency_fallback_total{mode="block"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Blocking residency fallback detected"
+          description: "{{ $labels.tenant }} has residency fallback=block"

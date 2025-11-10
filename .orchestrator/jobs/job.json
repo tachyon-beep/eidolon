@@ -1,0 +1,53 @@
+{
+  "id": "job",
+  "name": "job",
+  "tasks": [
+    {
+      "id": "task-1",
+      "name": "task-1",
+      "image": "eidolon/worker:latest",
+      "command": [
+        "python",
+        "-m",
+        "task"
+      ],
+      "args": [],
+      "env": {},
+      "inputs": {},
+      "resources": {},
+      "timeouts": {},
+      "retries": {},
+      "concurrency": {},
+      "cache": {},
+      "artifacts": {},
+      "secrets": [],
+      "policy": {
+        "egress": "deny",
+        "network_profile": "restricted",
+        "residency": {
+          "required_regions": [
+            "ap-southeast-2"
+          ],
+          "preferred_regions": [
+            "ap-southeast-2"
+          ],
+          "fallback": "block"
+        }
+      },
+      "metadata": {
+        "tenant": "acme",
+        "repo": "proj",
+        "run_id": "run-1",
+        "context": {
+          "trace_id": "758d66b3cb410478915b832e",
+          "span_id": "8766a55bf939900c",
+          "task_id": "task-1",
+          "parent_span_id": null,
+          "residency_fallback": null
+        }
+      }
+    }
+  ],
+  "dependencies": [],
+  "max_parallelism": 100
+}

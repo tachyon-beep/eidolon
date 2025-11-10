@@ -1,0 +1,22 @@
+{
+  "title": "Orchestrator Residency",
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Residency Fallbacks by Mode",
+      "targets": [
+        {"expr": "sum by(mode)(residency_fallback_total)"}
+      ],
+      "datasource": {"type": "prometheus", "uid": "Prometheus"}
+    },
+    {
+      "type": "timeseries",
+      "title": "Queue Latency p95",
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum(rate(orchestrator_queue_latency_seconds_bucket[5m])) by (le))"}
+      ],
+      "datasource": {"type": "prometheus", "uid": "Prometheus"}
+    }
+  ]
+}

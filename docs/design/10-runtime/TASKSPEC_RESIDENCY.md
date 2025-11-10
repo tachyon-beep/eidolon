@@ -55,7 +55,7 @@ what the scheduler/adapters must do with those hints, and how auditors retrieve 
 ## 4. Audit & observability
 
 * `drift_results` / `gatecheck_results` already receive residency fallback metrics via rulepacks; this doc focuses on runtime evidence.
-* Control Plane stores placement documents in `metadata.residency_log`. Operators query via `GET /orchestrator/runs/{id}/placements` (API stub).
+* Control Plane stores placement documents in `.orchestrator/placements.jsonl` (prototype) / `metadata.residency_log` (service). Operators query via `GET /orchestrator/runs/{id}/placements` (API stub).
 * Prometheus metrics:
   * `residency_enforced_total{tenant,region}` – increments whenever a task is scheduled in a required region.
   * `residency_fallback_total{tenant,mode}` – increments on block/queue/degrade.

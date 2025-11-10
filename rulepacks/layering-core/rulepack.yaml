@@ -1,0 +1,72 @@
+metadata:
+  id: RP-LAYERING-CORE
+  name: Layering Core Pack
+  version: 1.0.0
+  summary: Enforce UI/App/Data layering boundaries and keep data boundaries within healthy sizes.
+  owners: [refiner, conformance]
+  tags: [layering, baseline]
+  created_at: "2025-02-15T00:00:00Z"
+  updated_at: "2025-02-15T00:00:00Z"
+rules:
+  - id: layering-ui-blocks-data
+    description: UI layer modules must not import directly from the data layer.
+    category: layering
+    severity: error
+    enforcement: block
+    scopes: [drift, gatecheck]
+    selector:
+      source: import_edges
+      conditions:
+        - field: source_boundary
+          op: match
+          value: ui.*
+        - field: target_name
+          op: match
+          value: data.*
+    predicate:
+      kind: forbid
+    autofix:
+      action: introduce_facade
+      message: Route data access through an app/service facade.
+  - id: layering-app-import-limits
+    description: App boundaries should not depend on more than 20 distinct data modules.
+    category: layering
+    severity: warn
+    enforcement: warn
+    scopes: [drift, gatecheck]
+    selector:
+      source: import_edges
+      conditions:
+        - field: source_boundary
+          op: match
+          value: app.*
+        - field: target_name
+          op: match
+          value: data.*
+    predicate:
+      kind: threshold
+      message: Too many data imports from app boundary.
+      threshold:
+        aggregator: count
+        operator: lte
+        value: 20
+  - id: data-boundary-size-cap
+    description: Data boundaries should stay below 15k SLOC to keep ownership manageable.
+    category: layering
+    severity: warn
+    enforcement: warn
+    scopes: [drift, gatecheck]
+    selector:
+      source: boundary_stats
+      conditions:
+        - field: boundary
+          op: match
+          value: data.*
+    predicate:
+      kind: threshold
+      message: Data boundary exceeds recommended size.
+      threshold:
+        aggregator: sum
+        field: total_sloc
+        operator: lte
+        value: 15000

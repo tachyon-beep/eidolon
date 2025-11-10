@@ -1,0 +1,88 @@
+{
+  "metadata": {
+    "id": "RP-SECURITY-CALL-BAN",
+    "name": "Security Call Ban Pack",
+    "version": "1.0.0",
+    "summary": "Prevent dynamic evaluation helpers and restrict access to sensitive sinks.",
+    "owners": [
+      "security",
+      "refiner"
+    ],
+    "tags": [
+      "security",
+      "guardrails"
+    ],
+    "created_at": "2025-02-15T00:00:00Z",
+    "updated_at": "2025-02-15T00:00:00Z"
+  },
+  "rules": [
+    {
+      "id": "block-dynamic-eval",
+      "description": "Disallow usage of eval/exec/compile at runtime.",
+      "severity": "error",
+      "enforcement": "block",
+      "selector_source": "function_calls",
+      "sql": "SELECT fc.path AS path, fc.callee_name AS callee_name\nFROM function_calls AS fc\nWHERE fc.run_id = %(run_id)s\n  AND fc.callee_name = ANY(%(callee_name_0)s)",
+      "parameters": {
+        "callee_name_0": [
+          "eval",
+          "exec",
+          "compile"
+        ]
+      },
+      "predicate": {
+        "kind": "forbid"
+      },
+      "scopes": [
+        "drift",
+        "gatecheck"
+      ],
+      "category": "security"
+    },
+    {
+      "id": "prevent-secrets-exfil",
+      "description": "Secrets boundary cannot import utility modules tagged as exfil sinks.",
+      "severity": "error",
+      "enforcement": "block",
+      "selector_source": "import_edges",
+      "sql": "SELECT ie.source_boundary AS source_boundary, ie.target_name AS target_name, ie.usage_count AS usage_count\nFROM import_edges AS ie\nWHERE ie.run_id = %(run_id)s\n  AND (ie.source_boundary LIKE %(source_boundary_0)s ESCAPE '\\\\')\n  AND (ie.target_name LIKE %(target_name_1)s ESCAPE '\\\\')",
+      "parameters": {
+        "source_boundary_0": "secrets.%",
+        "target_name_1": "util.exfil.%"
+      },
+      "predicate": {
+        "kind": "forbid"
+      },
+      "scopes": [
+        "drift",
+        "gatecheck"
+      ],
+      "category": "security"
+    },
+    {
+      "id": "limit-secret-boundary-size",
+      "description": "Keep secrets boundary lean (<1k SLOC) for easier auditing.",
+      "severity": "warn",
+      "enforcement": "warn",
+      "selector_source": "boundary_stats",
+      "sql": "SELECT bs.boundary AS boundary, bs.module_count AS module_count, bs.total_sloc AS total_sloc, bs.total_functions AS total_functions, bs.total_classes AS total_classes\nFROM boundary_stats AS bs\nWHERE bs.run_id = %(run_id)s\n  AND (bs.boundary LIKE %(boundary_0)s ESCAPE '\\\\')",
+      "parameters": {
+        "boundary_0": "secrets.%"
+      },
+      "predicate": {
+        "kind": "threshold",
+        "threshold": {
+          "aggregator": "sum",
+          "operator": "lte",
+          "value": 1000.0,
+          "field": "total_sloc"
+        }
+      },
+      "scopes": [
+        "drift",
+        "gatecheck"
+      ],
+      "category": "security"
+    }
+  ]
+}

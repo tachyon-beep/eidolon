@@ -71,3 +71,7 @@ SEC-01 enforces region pinning per tenant, but ORCH-01 TaskSpec lacks fields to 
 * TaskSpec schema merged with residency section.
 * Local + Temporal adapters honour residency settings in integration tests.
 * Audit trail shows placement + policy compliance per task.
+
+> **Implementation note (2025-02)**: ORCH-01 now carries the `policy.residency` block and documents enforcement semantics
+> (see `docs/design/10-runtime/ORCHESTRATOR_SPEC.md` + `docs/design/10-runtime/TASKSPEC_RESIDENCY.md`). Scheduler + adapter
+> work remains to wire these fields into runtime placement, but the schema + audit contract are defined.

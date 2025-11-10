@@ -55,3 +55,7 @@ OBS-01 requires per-tenant metrics, logs, and traces keyed by `trace_id = HMAC(t
 * ORCH-01 updated with context propagation requirements (pointer to this doc).
 * Local + Temporal adapters emit traces/metrics/logs with consistent IDs in staging environment.
 * OBS-01 dashboards ingest the new labels and show per-tenant slices.
+
+> **Implementation note (2025-02)**: TaskSpec metadata/context is now part of ORCH-01 (§3 + §15) and the end-to-end envelope
+> is captured in `docs/design/10-runtime/TELEMETRY_CONTEXT.md`. Adapters still need to plumb env vars + OTLP exporters, but
+> the propagation contract is frozen for implementation.

@@ -1,0 +1,43 @@
+metadata:
+  id: RP-SAMPLE
+  name: Sample Pack
+  version: 1.2.3
+  summary: Baseline layering + security constraints for tests.
+  owners:
+    - refiner
+    - conformance
+  tags: [test]
+rules:
+  - id: layering-app-blocks-data
+    description: App layer must not depend directly on data layer modules.
+    category: layering
+    severity: error
+    enforcement: block
+    scopes: [drift, gatecheck]
+    selector:
+      source: import_edges
+      conditions:
+        - field: source_boundary
+          op: match
+          value: app.*
+        - field: target_name
+          op: match
+          value: data.*
+    predicate:
+      kind: forbid
+    autofix:
+      action: introduce_facade
+      message: Route data access through a facade service.
+  - id: security-no-unsafe-calls
+    description: Avoid invoking eval/exec to keep guardrails deterministic.
+    category: security
+    severity: warn
+    enforcement: warn
+    selector:
+      source: function_calls
+      conditions:
+        - field: callee_name
+          op: in
+          value: [eval, exec]
+    predicate:
+      kind: forbid

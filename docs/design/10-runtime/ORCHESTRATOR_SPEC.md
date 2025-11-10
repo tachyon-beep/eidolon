@@ -46,8 +46,25 @@ Define a stable, engine‑agnostic adapter contract for submitting, running, tra
   "cache": {"key": "sha256:...:tool@1.4:policy@2025-10-01", "ttl": "30d"},
   "artifacts": {"outputs": [{"name": "evaluation", "path": "/out/evaluation.json"}]},
   "secrets": ["OPENAI_API_KEY"],
-  "policy": {"egress": "deny", "network_profile": "restricted"},
-  "metadata": {"tenant": "acme", "repo": "proj-x", "run_id": "r-123"}
+  "policy": {
+    "egress": "deny",
+    "network_profile": "restricted",
+    "residency": {
+      "required_regions": ["ap-southeast-2"],
+      "preferred_regions": ["ap-southeast-2"],
+      "fallback": "queue"
+    }
+  },
+  "metadata": {
+    "tenant": "acme",
+    "repo": "proj-x",
+    "run_id": "r-123",
+    "context": {
+      "trace_id": "e5d17b5b2fa2",
+      "span_id": "2f9a1c4b7d3e",
+      "task_id": "evaluate-file:7b3c"
+    }
+  }
 }
 ```
 
@@ -61,7 +78,15 @@ Define a stable, engine‑agnostic adapter contract for submitting, running, tra
 * **cache.key**: if present, adapter must attempt a cache lookup; cache store is provided by Control Plane.
 * **artifacts.outputs**: adapter uploads paths to Object Store and returns signed URIs.
 * **secrets**: opaque names resolved by Secret Manager; not logged.
-* **policy**: sandbox hints (network profile, egress). Adapters implement best‑effort.
+* **policy**: sandbox hints (network profile, egress, residency). Residency hints are authoritative.
+* **metadata**: free‑form labels plus the canonical telemetry context envelope (§15).
+
+### 3.2 Residency semantics
+
+* `policy.residency.required_regions`: hard affinity. The scheduler filters worker pools by region labels and rejects scheduling outside the set.
+* `policy.residency.preferred_regions`: ties broken across compliant pools; also used when `fallback=degrade`.
+* `policy.residency.fallback`: `block` (fail fast with `PolicyViolation`), `queue` (stay pending), `degrade` (spill into `preferred_regions` while emitting an audit event + metrics).
+* Placement decisions MUST be logged with `{task_id, run_id, region, residency_source, fallback_mode}` and persisted with the Job metadata for audits and SEC-01 evidence.
 
 ## 4. JobSpec
 
@@ -187,7 +212,11 @@ Each error carries: `category`, `message`, `details`, `attempt`, `timestamp`.
 
 ## 15. Telemetry
 
-* Emit OpenTelemetry spans for job/run/task with attributes: orchestrator, queue_wait_ms, exec_ms, retries, cache_hit, resources_used.
+* Control Plane computes `{trace_id, span_id, tenant, repo, run_id, task_id}` and injects them into `metadata.context`.
+* Adapters MUST propagate these values via env vars (`EID_TRACE_ID`, `EID_SPAN_ID`, `EID_TENANT`, `EID_RUN_ID`, `EID_TASK_ID`) to downstream workers.
+* Emit OpenTelemetry spans for job/run/task with attributes: orchestrator, queue_wait_ms, exec_ms, retries, cache_hit, resources_used, residency_region, residency_fallback_mode.
+* Logs must be prefixed with `[trace=<trace_id> span=<span_id>]` (or structured equivalently) and exported to the collector sidecar.
+* Metrics (queue latency, task_exec_ms, cache_hits, residency_fallback_total) carry the tenant/repo/run/task labels derived from the context payload; use hashed IDs when mandated by SEC-01.
 
 ## 16. Security posture
 

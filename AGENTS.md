@@ -35,7 +35,7 @@
 ## Rapid Plan Status (internal roadmap)
 - **CodeGraph (RAPID-CG-SCALE)** – ✅ completed. Scanner/ingest/query risks closed; see `docs/design/rapid/CODEGRAPH_RAPID.md` and `benchmarks/reports/*.json`.
 - **Rulepack DSL** – 🔄 in progress. Implementation plan captured in `docs/design/rapid/RULEPACK_RAPID.md`; next up is schema + compiler spike.
-- **TaskSpec Residency** – 📝 planned. Rapid design pending; follow SEC-01 guidance once Rulepack lands.
+- **TaskSpec Residency** – 🔄 schema + documentation merged (see ORCH-01 §3/§15); adapters now need to enforce placement + telemetry.
 - **Product LLM bridge** – 📝 planned. Sanitised Balanced mode documented in SEC-01; awaiting engineering slot.
 
 ## Security & Configuration Tips

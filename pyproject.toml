@@ -11,6 +11,9 @@ dependencies = [
     "psutil>=6.0.0",
     "psycopg[binary]>=3.2",
     "psycopg-pool>=3.2",
+    "pyyaml>=6.0",
+    "jsonschema>=4.21",
+    "pytest>=8.3",
 ]
 
 [project.scripts]
@@ -22,6 +25,9 @@ eidolon-codegraph-query-bench = "eidolon.codegraph.queries:main"
 eidolon-synthetic-rename = "eidolon.codegraph.rename:main"
 eidolon-codegraph-compare = "eidolon.codegraph.compare:main"
 eidolon-codegraph-query-concurrency = "eidolon.codegraph.query_concurrency:main"
+eidolon-rulepack = "eidolon.rulepack.cli:main"
+eidolon-rulepack-drift = "eidolon.rulepack.drift_job:main"
+eidolon-rulepack-gatecheck = "eidolon.rulepack.gatecheck_job:main"
 
 [build-system]
 requires = ["hatchling"]

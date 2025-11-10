@@ -1,0 +1,60 @@
+metadata:
+  id: RP-SECURITY-CALL-BAN
+  name: Security Call Ban Pack
+  version: 1.0.0
+  summary: Prevent dynamic evaluation helpers and restrict access to sensitive sinks.
+  owners: [security, refiner]
+  tags: [security, guardrails]
+  created_at: "2025-02-15T00:00:00Z"
+  updated_at: "2025-02-15T00:00:00Z"
+rules:
+  - id: block-dynamic-eval
+    description: Disallow usage of eval/exec/compile at runtime.
+    category: security
+    severity: error
+    enforcement: block
+    scopes: [drift, gatecheck]
+    selector:
+      source: function_calls
+      conditions:
+        - field: callee_name
+          op: in
+          value: [eval, exec, compile]
+    predicate:
+      kind: forbid
+  - id: prevent-secrets-exfil
+    description: Secrets boundary cannot import utility modules tagged as exfil sinks.
+    category: security
+    severity: error
+    enforcement: block
+    scopes: [drift, gatecheck]
+    selector:
+      source: import_edges
+      conditions:
+        - field: source_boundary
+          op: match
+          value: secrets.*
+        - field: target_name
+          op: match
+          value: util.exfil.*
+    predicate:
+      kind: forbid
+  - id: limit-secret-boundary-size
+    description: Keep secrets boundary lean (<1k SLOC) for easier auditing.
+    category: security
+    severity: warn
+    enforcement: warn
+    scopes: [drift, gatecheck]
+    selector:
+      source: boundary_stats
+      conditions:
+        - field: boundary
+          op: match
+          value: secrets.*
+    predicate:
+      kind: threshold
+      threshold:
+        aggregator: sum
+        field: total_sloc
+        operator: lte
+        value: 1000

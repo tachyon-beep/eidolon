@@ -1,0 +1,263 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eidolon.dev/schemas/rulepack.schema.json",
+  "title": "Eidolon Rulepack",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["metadata", "rules"],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "version", "summary", "owners"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_.:-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "owners": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "default": []
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/rule"
+      }
+    }
+  },
+  "$defs": {
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "description",
+        "severity",
+        "enforcement",
+        "selector",
+        "predicate"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_.-]+$"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warn", "error"]
+        },
+        "enforcement": {
+          "type": "string",
+          "enum": ["observe", "warn", "block"]
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "selector": {
+          "$ref": "#/$defs/selector"
+        },
+        "predicate": {
+          "$ref": "#/$defs/predicate"
+        },
+        "autofix": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "message"],
+          "properties": {
+            "action": {
+              "type": "string",
+              "minLength": 1
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1
+            },
+            "url": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        }
+      }
+    },
+    "selector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "file_metrics",
+            "file_imports",
+            "function_calls",
+            "import_edges",
+            "boundary_stats"
+          ]
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/condition"
+          },
+          "default": []
+        }
+      }
+    },
+    "condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "op", "value"],
+      "properties": {
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "op": {
+          "type": "string",
+          "enum": [
+            "equals",
+            "not_equals",
+            "in",
+            "not_in",
+            "like",
+            "not_like",
+            "match",
+            "gt",
+            "gte",
+            "lt",
+            "lte"
+          ]
+        },
+        "value": {
+          "oneOf": [
+            {
+              "type": ["string", "number", "boolean"]
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": ["string", "number", "boolean"]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "predicate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["forbid", "threshold"]
+        },
+        "message": {
+          "type": "string"
+        },
+        "threshold": {
+          "$ref": "#/$defs/threshold"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "threshold"
+              }
+            }
+          },
+          "then": {
+            "required": ["threshold"]
+          }
+        }
+      ]
+    },
+    "threshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["aggregator", "operator", "value"],
+      "properties": {
+        "aggregator": {
+          "type": "string",
+          "enum": ["count", "sum"]
+        },
+        "field": {
+          "type": "string"
+        },
+        "operator": {
+          "type": "string",
+          "enum": ["gt", "gte", "lt", "lte", "eq", "ne"]
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "aggregator": {
+                "const": "sum"
+              }
+            }
+          },
+          "then": {
+            "required": ["field"]
+          }
+        }
+      ]
+    }
+  }
+}

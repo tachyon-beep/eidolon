@@ -45,6 +45,14 @@ HLD/RF/DR specs assume a unified Rulepack DSL, but no executable form exists tod
 4. Hook RF‑01 GateCheck service to use the same compiled pack for design-time validation.
 5. Package CLI + schema, publish sample packs (`layering-core`, `security-call-ban`).
 
+> **Implementation note (2025-02)**: The initial schema + compiler scaffolding now lives under `src/eidolon/rulepack/`. Use
+> `uv run eidolon-rulepack init` to scaffold a pack, `... test <path>` to validate + compile it against CodeGraph tables,
+> `... publish <path>` to emit the JSON artefact aligned with this plan, `... eval <path> --run-id <id>` to execute the
+> pack against a `scan_runs.id`, `uv run eidolon-rulepack-drift --rulepack <path> (--run-id|--repo-root)` to run the
+> DR-01 drift job wiring, and `uv run eidolon-rulepack-gatecheck --rulepack <path> (--run-id|--repo-root)` (with optional
+> `--changed-path/--changed-boundary` filters) to simulate RF-01 GateChecks over proposed plan deltas. Canonical packs
+> live under `rulepacks/` (e.g., `rulepacks/layering-core`, `rulepacks/security-call-ban`).
+
 ## 6. Metrics & Exit Criteria
 - Compiler passes unit tests covering ≥5 canonical rules.
 - Drift detection runs using the compiled pack for at least 2 rule categories (layering, security) without regressions.

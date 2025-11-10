@@ -1,0 +1,96 @@
+{
+  "metadata": {
+    "id": "RP-LAYERING-CORE",
+    "name": "Layering Core Pack",
+    "version": "1.0.0",
+    "summary": "Enforce UI/App/Data layering boundaries and keep data boundaries within healthy sizes.",
+    "owners": [
+      "refiner",
+      "conformance"
+    ],
+    "tags": [
+      "layering",
+      "baseline"
+    ],
+    "created_at": "2025-02-15T00:00:00Z",
+    "updated_at": "2025-02-15T00:00:00Z"
+  },
+  "rules": [
+    {
+      "id": "layering-ui-blocks-data",
+      "description": "UI layer modules must not import directly from the data layer.",
+      "severity": "error",
+      "enforcement": "block",
+      "selector_source": "import_edges",
+      "sql": "SELECT ie.source_boundary AS source_boundary, ie.target_name AS target_name, ie.usage_count AS usage_count\nFROM import_edges AS ie\nWHERE ie.run_id = %(run_id)s\n  AND (ie.source_boundary LIKE %(source_boundary_0)s ESCAPE '\\\\')\n  AND (ie.target_name LIKE %(target_name_1)s ESCAPE '\\\\')",
+      "parameters": {
+        "source_boundary_0": "ui.%",
+        "target_name_1": "data.%"
+      },
+      "predicate": {
+        "kind": "forbid"
+      },
+      "scopes": [
+        "drift",
+        "gatecheck"
+      ],
+      "category": "layering",
+      "autofix": {
+        "action": "introduce_facade",
+        "message": "Route data access through an app/service facade."
+      }
+    },
+    {
+      "id": "layering-app-import-limits",
+      "description": "App boundaries should not depend on more than 20 distinct data modules.",
+      "severity": "warn",
+      "enforcement": "warn",
+      "selector_source": "import_edges",
+      "sql": "SELECT ie.source_boundary AS source_boundary, ie.target_name AS target_name, ie.usage_count AS usage_count\nFROM import_edges AS ie\nWHERE ie.run_id = %(run_id)s\n  AND (ie.source_boundary LIKE %(source_boundary_0)s ESCAPE '\\\\')\n  AND (ie.target_name LIKE %(target_name_1)s ESCAPE '\\\\')",
+      "parameters": {
+        "source_boundary_0": "app.%",
+        "target_name_1": "data.%"
+      },
+      "predicate": {
+        "kind": "threshold",
+        "message": "Too many data imports from app boundary.",
+        "threshold": {
+          "aggregator": "count",
+          "operator": "lte",
+          "value": 20.0
+        }
+      },
+      "scopes": [
+        "drift",
+        "gatecheck"
+      ],
+      "category": "layering"
+    },
+    {
+      "id": "data-boundary-size-cap",
+      "description": "Data boundaries should stay below 15k SLOC to keep ownership manageable.",
+      "severity": "warn",
+      "enforcement": "warn",
+      "selector_source": "boundary_stats",
+      "sql": "SELECT bs.boundary AS boundary, bs.module_count AS module_count, bs.total_sloc AS total_sloc, bs.total_functions AS total_functions, bs.total_classes AS total_classes\nFROM boundary_stats AS bs\nWHERE bs.run_id = %(run_id)s\n  AND (bs.boundary LIKE %(boundary_0)s ESCAPE '\\\\')",
+      "parameters": {
+        "boundary_0": "data.%"
+      },
+      "predicate": {
+        "kind": "threshold",
+        "message": "Data boundary exceeds recommended size.",
+        "threshold": {
+          "aggregator": "sum",
+          "operator": "lte",
+          "value": 15000.0,
+          "field": "total_sloc"
+        }
+      },
+      "scopes": [
+        "drift",
+        "gatecheck"
+      ],
+      "category": "layering"
+    }
+  ]
+}

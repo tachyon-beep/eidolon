@@ -5,8 +5,6 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 import time
 
-from anthropic import AsyncAnthropic
-
 from models import Agent, AgentScope, AgentStatus, Card, CardType, CardStatus, ProposedFix
 from analysis import CodeAnalyzer, ModuleInfo
 from storage import Database
@@ -21,6 +19,7 @@ from resilience import (
     AI_RATE_LIMITER
 )
 from logging_config import get_logger
+from llm_providers import create_provider, LLMProvider
 
 logger = get_logger(__name__)
 
@@ -28,16 +27,21 @@ logger = get_logger(__name__)
 class AgentOrchestrator:
     """Orchestrates the hierarchical agent system with parallel execution"""
 
-    def __init__(self, db: Database, api_key: Optional[str] = None,
+    def __init__(self, db: Database,
+                 llm_provider: Optional[LLMProvider] = None,
                  max_concurrent_functions: int = 10,
                  max_concurrent_modules: int = 3,
                  enable_cache: bool = True):
         self.db = db
-        self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-        if not self.api_key:
-            raise ValueError("ANTHROPIC_API_KEY not set")
 
-        self.client = AsyncAnthropic(api_key=self.api_key)
+        # Initialize LLM provider (auto-detects from environment if not provided)
+        self.llm_provider = llm_provider or create_provider()
+        logger.info(
+            "orchestrator_llm_provider",
+            provider=self.llm_provider.get_provider_name(),
+            model=self.llm_provider.get_model_name()
+        )
+
         self.analyzer = CodeAnalyzer()
         self.call_graph = None  # Will be populated during analysis
 
@@ -67,18 +71,17 @@ class AgentOrchestrator:
         if self.cache:
             await self.cache.initialize()
 
-    async def _call_ai_with_resilience(self, model: str, max_tokens: int, messages: list, estimated_tokens: int = 1000):
+    async def _call_ai_with_resilience(self, max_tokens: int, messages: list, estimated_tokens: int = 1000):
         """
         Call AI API with full resilience patterns: timeout, retry, circuit breaker, rate limiting
 
         Args:
-            model: Model to use
             max_tokens: Max tokens in response
             messages: Messages to send
             estimated_tokens: Estimated token usage for rate limiting
 
         Returns:
-            API response
+            LLMResponse from provider
 
         Raises:
             Exception: If all retries exhausted or circuit breaker open
@@ -86,12 +89,12 @@ class AgentOrchestrator:
         # Rate limiting - wait if necessary
         await AI_RATE_LIMITER.acquire(estimated_tokens)
 
-        # Define the actual API call
+        # Define the actual API call using provider abstraction
         async def make_api_call():
-            return await self.client.messages.create(
-                model=model,
+            return await self.llm_provider.create_completion(
+                messages=messages,
                 max_tokens=max_tokens,
-                messages=messages
+                temperature=0.0
             )
 
         # Wrap with timeout
@@ -113,7 +116,7 @@ class AgentOrchestrator:
         )
 
         # Update rate limiter with actual token usage
-        actual_tokens = response.usage.input_tokens + response.usage.output_tokens
+        actual_tokens = response.input_tokens + response.output_tokens
         AI_RATE_LIMITER.record_actual_tokens(actual_tokens)
 
         return response
@@ -635,18 +638,17 @@ Be specific and focus on actionable fixes.""")
         context = '\n'.join(context_parts)
         agent.add_message("user", context)
 
-        # Call Claude API with higher token limit for fixes (with resilience)
+        # Call AI API with higher token limit for fixes (with resilience)
         try:
             response = await self._call_ai_with_resilience(
-                model="claude-3-5-sonnet-20241022",
                 max_tokens=2048,
                 messages=[{"role": "user", "content": context}],
                 estimated_tokens=2500
             )
 
-            analysis = response.content[0].text
-            tokens_in = response.usage.input_tokens
-            tokens_out = response.usage.output_tokens
+            analysis = response.content
+            tokens_in = response.input_tokens
+            tokens_out = response.output_tokens
 
             latency = (time.time() - start_time) * 1000
             agent.add_message("assistant", analysis, tokens_in, tokens_out, latency_ms=latency)
@@ -715,15 +717,14 @@ Be concise and focus on high-level patterns."""
 
         try:
             response = await self._call_ai_with_resilience(
-                model="claude-3-5-sonnet-20241022",
                 max_tokens=1024,
                 messages=[{"role": "user", "content": context}],
                 estimated_tokens=1500
             )
 
-            analysis = response.content[0].text
-            tokens_in = response.usage.input_tokens
-            tokens_out = response.usage.output_tokens
+            analysis = response.content
+            tokens_in = response.input_tokens
+            tokens_out = response.output_tokens
 
             latency = (time.time() - start_time) * 1000
             agent.add_message("assistant", analysis, tokens_in, tokens_out, latency_ms=latency)
@@ -787,15 +788,14 @@ Focus on the big picture and prioritize actionable insights."""
 
         try:
             response = await self._call_ai_with_resilience(
-                model="claude-3-5-sonnet-20241022",
                 max_tokens=2048,
                 messages=[{"role": "user", "content": context}],
                 estimated_tokens=2500
             )
 
-            analysis = response.content[0].text
-            tokens_in = response.usage.input_tokens
-            tokens_out = response.usage.output_tokens
+            analysis = response.content
+            tokens_in = response.input_tokens
+            tokens_out = response.output_tokens
 
             latency = (time.time() - start_time) * 1000
             agent.add_message("assistant", analysis, tokens_in, tokens_out, latency_ms=latency)

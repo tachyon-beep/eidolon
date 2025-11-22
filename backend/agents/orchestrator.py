@@ -12,6 +12,17 @@ from analysis import CodeAnalyzer, ModuleInfo
 from storage import Database
 from cache import CacheManager
 from git_integration import GitManager, GitChanges
+from resilience import (
+    retry_with_backoff,
+    with_timeout,
+    TimeoutConfig,
+    RetryConfig,
+    AI_API_BREAKER,
+    AI_RATE_LIMITER
+)
+from logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class AgentOrchestrator:
@@ -56,6 +67,57 @@ class AgentOrchestrator:
         if self.cache:
             await self.cache.initialize()
 
+    async def _call_ai_with_resilience(self, model: str, max_tokens: int, messages: list, estimated_tokens: int = 1000):
+        """
+        Call AI API with full resilience patterns: timeout, retry, circuit breaker, rate limiting
+
+        Args:
+            model: Model to use
+            max_tokens: Max tokens in response
+            messages: Messages to send
+            estimated_tokens: Estimated token usage for rate limiting
+
+        Returns:
+            API response
+
+        Raises:
+            Exception: If all retries exhausted or circuit breaker open
+        """
+        # Rate limiting - wait if necessary
+        await AI_RATE_LIMITER.acquire(estimated_tokens)
+
+        # Define the actual API call
+        async def make_api_call():
+            return await self.client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                messages=messages
+            )
+
+        # Wrap with timeout
+        async def call_with_timeout():
+            return await with_timeout(
+                make_api_call,
+                timeout=TimeoutConfig.AI_API_TIMEOUT,
+                timeout_message=f"AI API call timed out after {TimeoutConfig.AI_API_TIMEOUT}s"
+            )
+
+        # Wrap with circuit breaker
+        async def call_with_breaker():
+            return await AI_API_BREAKER.call(call_with_timeout)
+
+        # Wrap with retry logic
+        response = await retry_with_backoff(
+            call_with_breaker,
+            config=RetryConfig()
+        )
+
+        # Update rate limiter with actual token usage
+        actual_tokens = response.usage.input_tokens + response.usage.output_tokens
+        AI_RATE_LIMITER.record_actual_tokens(actual_tokens)
+
+        return response
+
     async def analyze_codebase(self, path: str) -> Agent:
         """
         Start hierarchical analysis of a codebase.
@@ -75,9 +137,13 @@ class AgentOrchestrator:
         modules = self.analyzer.analyze_directory()
 
         # Build call graph for cross-file dependency analysis
-        print("Building call graph...")
+        logger.info("building_call_graph")
         self.call_graph = self.analyzer.build_call_graph(modules)
-        print(f"Call graph built: {len(self.call_graph['functions'])} functions, {len(self.call_graph['orphaned'])} orphaned")
+        logger.info(
+            "call_graph_built",
+            functions=len(self.call_graph['functions']),
+            orphaned=len(self.call_graph['orphaned'])
+        )
 
         # Initialize progress tracking
         total_functions = sum(
@@ -93,8 +159,13 @@ class AgentOrchestrator:
             'cache_misses': 0,
             'errors': []
         }
-        print(f"Starting parallel analysis: {len(modules)} modules, {total_functions} functions")
-        print(f"Concurrency: {self.max_concurrent_modules} modules, {self.max_concurrent_functions} functions")
+        logger.info(
+            "starting_parallel_analysis",
+            modules=len(modules),
+            functions=total_functions,
+            max_concurrent_modules=self.max_concurrent_modules,
+            max_concurrent_functions=self.max_concurrent_functions
+        )
 
         # Deploy module-level agents IN PARALLEL
         module_tasks = [
@@ -114,9 +185,14 @@ class AgentOrchestrator:
             else:
                 system_agent.children_ids.append(result.id)
 
-        print(f"Analysis complete: {self.progress['completed_modules']}/{len(modules)} modules, "
-              f"{self.progress['completed_functions']}/{total_functions} functions, "
-              f"{len(self.progress['errors'])} errors")
+        logger.info(
+            "analysis_complete",
+            completed_modules=self.progress['completed_modules'],
+            total_modules=len(modules),
+            completed_functions=self.progress['completed_functions'],
+            total_functions=total_functions,
+            errors=len(self.progress['errors'])
+        )
 
         # Run system-level analysis
         await self._run_system_analysis(system_agent, modules)
@@ -559,12 +635,13 @@ Be specific and focus on actionable fixes.""")
         context = '\n'.join(context_parts)
         agent.add_message("user", context)
 
-        # Call Claude API with higher token limit for fixes
+        # Call Claude API with higher token limit for fixes (with resilience)
         try:
-            response = await self.client.messages.create(
+            response = await self._call_ai_with_resilience(
                 model="claude-3-5-sonnet-20241022",
                 max_tokens=2048,
-                messages=[{"role": "user", "content": context}]
+                messages=[{"role": "user", "content": context}],
+                estimated_tokens=2500
             )
 
             analysis = response.content[0].text
@@ -637,10 +714,11 @@ Be concise and focus on high-level patterns."""
         agent.add_message("user", context)
 
         try:
-            response = await self.client.messages.create(
+            response = await self._call_ai_with_resilience(
                 model="claude-3-5-sonnet-20241022",
                 max_tokens=1024,
-                messages=[{"role": "user", "content": context}]
+                messages=[{"role": "user", "content": context}],
+                estimated_tokens=1500
             )
 
             analysis = response.content[0].text
@@ -708,10 +786,11 @@ Focus on the big picture and prioritize actionable insights."""
         agent.add_message("user", context)
 
         try:
-            response = await self.client.messages.create(
+            response = await self._call_ai_with_resilience(
                 model="claude-3-5-sonnet-20241022",
                 max_tokens=2048,
-                messages=[{"role": "user", "content": context}]
+                messages=[{"role": "user", "content": context}],
+                estimated_tokens=2500
             )
 
             analysis = response.content[0].text

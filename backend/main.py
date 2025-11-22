@@ -1,6 +1,6 @@
 import os
 import sys
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
@@ -12,6 +12,8 @@ from agents import AgentOrchestrator
 from api import create_routes
 from logging_config import configure_logging, get_logger
 from health import HealthChecker
+from metrics import get_metrics_response
+from request_context import analysis_registry
 
 # Configure logging at startup
 configure_logging(
@@ -79,6 +81,10 @@ async def shutdown():
     """Clean up on shutdown"""
     logger.info("application_shutdown", message="Shutting down gracefully")
 
+    # Cancel all active analyses
+    logger.info("cancelling_active_analyses")
+    await analysis_registry.cancel_all(reason="System shutdown")
+
     if db:
         logger.info("closing_database")
         await db.close()
@@ -122,6 +128,17 @@ async def readiness():
 async def liveness():
     """Liveness probe for Kubernetes"""
     return await health_checker.get_liveness() if health_checker else {"alive": True}
+
+
+@app.get("/metrics")
+async def metrics():
+    """
+    Prometheus metrics endpoint
+
+    Returns metrics in Prometheus text format for scraping.
+    """
+    content, content_type = get_metrics_response()
+    return Response(content=content, media_type=content_type)
 
 
 if __name__ == "__main__":

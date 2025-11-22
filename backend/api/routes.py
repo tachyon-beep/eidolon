@@ -4,10 +4,20 @@ from pydantic import BaseModel
 from pathlib import Path
 import asyncio
 import os
+import time
 
 from models import Card, CardStatus, Agent
 from storage import Database
 from agents import AgentOrchestrator
+from request_context import analysis_registry, AnalysisCancelledError
+from metrics import (
+    track_analysis, http_requests_total, http_request_duration_seconds,
+    http_requests_in_progress, websocket_connections_active,
+    websocket_messages_total, active_analyses
+)
+from logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 # Request/Response models
@@ -34,16 +44,21 @@ class ConnectionManager:
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
+        websocket_connections_active.set(len(self.active_connections))
 
     def disconnect(self, websocket: WebSocket):
         self.active_connections.remove(websocket)
+        websocket_connections_active.set(len(self.active_connections))
 
     async def broadcast(self, message: dict):
         """Broadcast message to all connected clients, removing dead connections"""
         dead_connections = []
+        msg_type = message.get('type', 'unknown')
+
         for connection in self.active_connections:
             try:
                 await connection.send_json(message)
+                websocket_messages_total.labels(direction='sent', type=msg_type).inc()
             except Exception as e:
                 # Connection is dead, mark for removal
                 dead_connections.append(connection)
@@ -52,6 +67,9 @@ class ConnectionManager:
         for conn in dead_connections:
             if conn in self.active_connections:
                 self.active_connections.remove(conn)
+
+        if dead_connections:
+            websocket_connections_active.set(len(self.active_connections))
 
 
 # Create router and connection manager
@@ -438,6 +456,55 @@ def create_routes(db: Database, orchestrator: AgentOrchestrator):
         """Invalidate cache for a specific file"""
         deleted = await orchestrator.invalidate_file_cache(file_path)
         return {"status": "invalidated", "deleted_entries": deleted, "file_path": file_path}
+
+    # Analysis management endpoints
+    @router.get("/analyses/active")
+    async def get_active_analyses():
+        """Get all currently active analyses"""
+        analyses = await analysis_registry.get_all_active()
+
+        # Update metric
+        active_analyses.set(len(analyses))
+
+        return {
+            "active_count": len(analyses),
+            "analyses": analyses
+        }
+
+    @router.delete("/analyses/{session_id}")
+    async def cancel_analysis(session_id: str):
+        """Cancel a running analysis"""
+        success = await analysis_registry.cancel(
+            session_id,
+            reason="User requested cancellation via API"
+        )
+
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Analysis session {session_id} not found")
+
+        logger.info("analysis_cancelled_via_api", session_id=session_id)
+
+        # Broadcast cancellation to WebSocket clients
+        await manager.broadcast({
+            "type": "analysis_cancelled",
+            "data": {"session_id": session_id}
+        })
+
+        return {
+            "status": "cancelled",
+            "session_id": session_id,
+            "message": "Analysis cancellation requested"
+        }
+
+    @router.get("/analyses/{session_id}/status")
+    async def get_analysis_status(session_id: str):
+        """Get status of a specific analysis"""
+        context = await analysis_registry.get(session_id)
+
+        if not context:
+            raise HTTPException(status_code=404, detail=f"Analysis session {session_id} not found")
+
+        return context.get_status()
 
     # WebSocket endpoint
     @router.websocket("/ws")

@@ -17,6 +17,8 @@ class FunctionInfo:
     complexity: int
     is_async: bool
     decorators: List[str]
+    calls: List[str]  # Functions this function calls
+    called_by: List[str] = None  # Functions that call this (populated later)
 
 
 @dataclass
@@ -146,6 +148,9 @@ class CodeAnalyzer:
             else:
                 decorators.append(ast.unparse(decorator) if hasattr(ast, 'unparse') else str(decorator))
 
+        # Extract function calls
+        calls = self._extract_function_calls(node)
+
         return FunctionInfo(
             name=node.name,
             line_start=node.lineno,
@@ -155,8 +160,33 @@ class CodeAnalyzer:
             docstring=ast.get_docstring(node) or "",
             complexity=self._calculate_complexity(node),
             is_async=isinstance(node, ast.AsyncFunctionDef),
-            decorators=decorators
+            decorators=decorators,
+            calls=calls,
+            called_by=[]
         )
+
+    def _extract_function_calls(self, node: ast.AST) -> List[str]:
+        """Extract all function calls made within this function"""
+        calls = []
+
+        for child in ast.walk(node):
+            if isinstance(child, ast.Call):
+                # Get the function name
+                func_name = None
+                if isinstance(child.func, ast.Name):
+                    # Simple function call: foo()
+                    func_name = child.func.id
+                elif isinstance(child.func, ast.Attribute):
+                    # Method call: obj.method() or module.func()
+                    func_name = child.func.attr
+                    # Try to get the full qualified name
+                    if isinstance(child.func.value, ast.Name):
+                        func_name = f"{child.func.value.id}.{child.func.attr}"
+
+                if func_name and func_name not in calls:
+                    calls.append(func_name)
+
+        return calls
 
     def _calculate_complexity(self, node: ast.AST) -> int:
         """Calculate cyclomatic complexity (simplified)"""
@@ -256,3 +286,109 @@ class CodeAnalyzer:
                 summary += f"  - Methods: {len(cls.methods)}\n"
 
         return summary
+
+    def build_call_graph(self, modules: List[ModuleInfo]) -> Dict[str, Any]:
+        """Build a call graph for the entire codebase"""
+        # Create a mapping of function name -> FunctionInfo
+        all_functions = {}
+
+        for module in modules:
+            module_name = Path(module.file_path).stem
+
+            # Add top-level functions
+            for func in module.functions:
+                key = f"{module_name}.{func.name}"
+                all_functions[key] = {
+                    'info': func,
+                    'module': module.file_path,
+                    'qualified_name': key
+                }
+
+            # Add class methods
+            for cls in module.classes:
+                for method in cls.methods:
+                    key = f"{module_name}.{cls.name}.{method.name}"
+                    all_functions[key] = {
+                        'info': method,
+                        'module': module.file_path,
+                        'qualified_name': key
+                    }
+
+        # Build reverse call graph (who calls whom)
+        for func_key, func_data in all_functions.items():
+            func_info = func_data['info']
+
+            for called_func_name in func_info.calls:
+                # Try to find the called function in our mapping
+                # This is simplified - in reality we'd need import resolution
+                for candidate_key in all_functions.keys():
+                    if candidate_key.endswith(called_func_name) or candidate_key.endswith(f".{called_func_name}"):
+                        called_func = all_functions[candidate_key]['info']
+                        if called_func.called_by is None:
+                            called_func.called_by = []
+                        if func_key not in called_func.called_by:
+                            called_func.called_by.append(func_key)
+
+        return {
+            'functions': all_functions,
+            'orphaned': [k for k, v in all_functions.items() if not v['info'].called_by],
+            'hotspots': sorted(
+                [(k, len(v['info'].called_by or [])) for k, v in all_functions.items()],
+                key=lambda x: x[1],
+                reverse=True
+            )[:10]
+        }
+
+    def get_function_context(self, func_info: FunctionInfo, call_graph: Dict[str, Any],
+                            module_info: ModuleInfo) -> Dict[str, Any]:
+        """Get context for a function including callers and callees"""
+        context = {
+            'function': func_info.name,
+            'calls': func_info.calls,
+            'called_by': func_info.called_by or [],
+            'caller_code': [],
+            'callee_code': []
+        }
+
+        # Get source code for this module
+        with open(module_info.file_path, 'r') as f:
+            lines = f.readlines()
+
+        # Get code for functions that call this one
+        for caller_name in (func_info.called_by or [])[:3]:  # Limit to 3 callers
+            if caller_name in call_graph['functions']:
+                caller_func = call_graph['functions'][caller_name]['info']
+                caller_module = call_graph['functions'][caller_name]['module']
+
+                try:
+                    with open(caller_module, 'r') as f:
+                        caller_lines = f.readlines()
+                    code = ''.join(caller_lines[caller_func.line_start - 1:caller_func.line_end])
+                    context['caller_code'].append({
+                        'name': caller_name,
+                        'code': code[:500]  # Limit size
+                    })
+                except:
+                    pass
+
+        # Get code for functions this one calls
+        for callee_name in func_info.calls[:3]:  # Limit to 3 callees
+            # Find the callee in our call graph
+            for candidate_key, candidate_data in call_graph['functions'].items():
+                if candidate_key.endswith(callee_name) or candidate_key.endswith(f".{callee_name}"):
+                    callee_func = candidate_data['info']
+                    callee_module = candidate_data['module']
+
+                    try:
+                        with open(callee_module, 'r') as f:
+                            callee_lines = f.readlines()
+                        code = ''.join(callee_lines[callee_func.line_start - 1:callee_func.line_end])
+                        context['callee_code'].append({
+                            'name': candidate_key,
+                            'code': code[:500]  # Limit size
+                        })
+                        break
+                    except:
+                        pass
+
+        return context

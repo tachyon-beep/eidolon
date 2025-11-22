@@ -6,7 +6,7 @@ import time
 
 from anthropic import AsyncAnthropic
 
-from models import Agent, AgentScope, AgentStatus, Card, CardType, CardStatus
+from models import Agent, AgentScope, AgentStatus, Card, CardType, CardStatus, ProposedFix
 from analysis import CodeAnalyzer, ModuleInfo
 from storage import Database
 
@@ -22,6 +22,7 @@ class AgentOrchestrator:
 
         self.client = AsyncAnthropic(api_key=self.api_key)
         self.analyzer = CodeAnalyzer()
+        self.call_graph = None  # Will be populated during analysis
 
     async def analyze_codebase(self, path: str) -> Agent:
         """
@@ -40,6 +41,11 @@ class AgentOrchestrator:
         # Analyze the codebase structure
         self.analyzer.base_path = Path(path)
         modules = self.analyzer.analyze_directory()
+
+        # Build call graph for cross-file dependency analysis
+        print("Building call graph...")
+        self.call_graph = self.analyzer.build_call_graph(modules)
+        print(f"Call graph built: {len(self.call_graph['functions'])} functions, {len(self.call_graph['orphaned'])} orphaned")
 
         # Deploy module-level agents
         for module_info in modules:
@@ -127,7 +133,7 @@ class AgentOrchestrator:
         return func_agent
 
     async def _run_function_analysis(self, agent: Agent, module_info: ModuleInfo, func_info: Any):
-        """Run AI-powered analysis on a function"""
+        """Run AI-powered analysis on a function with cross-file context"""
         start_time = time.time()
 
         # Read the actual source code
@@ -135,34 +141,70 @@ class AgentOrchestrator:
             lines = f.readlines()
             func_source = ''.join(lines[func_info.line_start - 1:func_info.line_end])
 
-        # Build context
-        context = f"""You are analyzing a function in a Python codebase.
+        # Get function context from call graph
+        context_info = self.analyzer.get_function_context(func_info, self.call_graph, module_info)
 
-File: {module_info.file_path}
-Function: {func_info.name}
-Lines: {func_info.line_start}-{func_info.line_end}
-Complexity: {func_info.complexity}
+        # Build enhanced context with caller/callee information
+        context_parts = [
+            f"You are analyzing a function in a Python codebase.\n",
+            f"File: {module_info.file_path}",
+            f"Function: {func_info.name}",
+            f"Lines: {func_info.line_start}-{func_info.line_end}",
+            f"Complexity: {func_info.complexity}\n",
+            f"Source:\n```python\n{func_source}\n```\n"
+        ]
 
-Source:
-```python
-{func_source}
-```
+        # Add caller context
+        if context_info['called_by']:
+            context_parts.append(f"**Called by:** {', '.join(context_info['called_by'][:3])}\n")
+            if context_info['caller_code']:
+                context_parts.append("**Caller code (for context):**")
+                for caller in context_info['caller_code']:
+                    context_parts.append(f"\n```python\n# {caller['name']}\n{caller['code']}\n```")
 
+        # Add callee context
+        if context_info['calls']:
+            context_parts.append(f"\n**Calls:** {', '.join(context_info['calls'][:3])}\n")
+            if context_info['callee_code']:
+                context_parts.append("**Called function code (for context):**")
+                for callee in context_info['callee_code']:
+                    context_parts.append(f"\n```python\n# {callee['name']}\n{callee['code']}\n```")
+
+        # Add analysis instructions
+        context_parts.append("""
 Analyze this function for:
-1. Potential bugs or errors
+1. Potential bugs or errors (especially at call boundaries)
 2. Code smells or anti-patterns
 3. Opportunities for improvement
 4. Security concerns
+5. Inconsistencies with callers/callees
 
-Be concise and specific. List findings as bullet points."""
+For EACH issue found, provide:
+- A clear description of the problem
+- If fixable, provide the FIXED CODE as a code block
 
+Format your response like this:
+## Issues Found
+
+### Issue 1: [Brief title]
+**Problem:** [Description]
+**Severity:** [High/Medium/Low]
+
+**Fix:**
+```python
+[corrected code here]
+```
+
+Be specific and focus on actionable fixes.""")
+
+        context = '\n'.join(context_parts)
         agent.add_message("user", context)
 
-        # Call Claude API
+        # Call Claude API with higher token limit for fixes
         try:
             response = await self.client.messages.create(
                 model="claude-3-5-sonnet-20241022",
-                max_tokens=1024,
+                max_tokens=2048,
                 messages=[{"role": "user", "content": context}]
             )
 
@@ -177,18 +219,22 @@ Be concise and specific. List findings as bullet points."""
             findings = [line.strip() for line in analysis.split('\n') if line.strip().startswith('-')]
             agent.findings.extend(findings)
 
-            # Create cards for significant findings
-            if findings:
+            # Try to extract a proposed fix from the response
+            proposed_fix = self._extract_proposed_fix(analysis, module_info, func_info, func_source)
+
+            # Create card with fix if available
+            if findings or proposed_fix:
                 card = Card(
                     id="",
                     type=CardType.REVIEW,
                     title=f"Analysis: {func_info.name}",
                     summary=analysis,
                     owner_agent=agent.id,
-                    status=CardStatus.NEW
+                    status=CardStatus.PROPOSED if proposed_fix else CardStatus.NEW,
+                    proposed_fix=proposed_fix
                 )
                 card.links.code.append(f"{module_info.file_path}:{func_info.line_start}")
-                card.metrics.confidence = 0.8  # Default confidence
+                card.metrics.confidence = 0.7 if proposed_fix else 0.8
 
                 card = await self.db.create_card(card)
                 agent.cards_created.append(card.id)
@@ -336,6 +382,61 @@ Focus on the big picture and prioritize actionable insights."""
         except Exception as e:
             agent.add_message("system", f"Error during analysis: {str(e)}")
             agent.update_status(AgentStatus.ERROR)
+
+    def _extract_proposed_fix(self, analysis: str, module_info: ModuleInfo,
+                             func_info: Any, original_code: str) -> Optional[ProposedFix]:
+        """Extract and validate a proposed fix from the AI's analysis"""
+        import re
+        import ast as python_ast
+
+        # Try to find code blocks in the response
+        code_blocks = re.findall(r'```python\n(.*?)```', analysis, re.DOTALL)
+
+        if not code_blocks:
+            return None
+
+        # Take the first code block as the proposed fix
+        fixed_code = code_blocks[0].strip()
+
+        # Extract explanation from the analysis
+        explanation_parts = []
+        current_section = None
+
+        for line in analysis.split('\n'):
+            if line.startswith('**Problem:**'):
+                current_section = 'problem'
+                explanation_parts.append(line)
+            elif line.startswith('**Fix:**'):
+                current_section = 'fix'
+            elif current_section == 'problem' and line.strip():
+                explanation_parts.append(line)
+
+        explanation = '\n'.join(explanation_parts) if explanation_parts else analysis[:500]
+
+        # Validate the proposed fix with AST
+        validation_errors = []
+        validated = False
+
+        try:
+            python_ast.parse(fixed_code)
+            validated = True
+        except SyntaxError as e:
+            validation_errors.append(f"Syntax error: {str(e)}")
+
+        # Create ProposedFix object
+        proposed_fix = ProposedFix(
+            original_code=original_code,
+            fixed_code=fixed_code,
+            explanation=explanation,
+            file_path=module_info.file_path,
+            line_start=func_info.line_start,
+            line_end=func_info.line_end,
+            confidence=0.75,
+            validated=validated,
+            validation_errors=validation_errors
+        )
+
+        return proposed_fix
 
     async def get_agent_hierarchy(self, root_agent_id: str) -> Dict[str, Any]:
         """Get the full agent hierarchy as a tree"""

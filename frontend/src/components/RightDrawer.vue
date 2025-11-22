@@ -72,6 +72,58 @@
         </div>
       </div>
 
+      <!-- Fix Tab -->
+      <div v-if="activeTab === 'fix' && card.proposed_fix" class="tab-panel">
+        <div class="fix-header">
+          <h3>Proposed Fix</h3>
+          <div class="fix-badges">
+            <span v-if="card.proposed_fix.validated" class="badge badge-success">✓ Validated</span>
+            <span v-else class="badge badge-error">⚠ Validation Failed</span>
+            <span class="badge badge-confidence">
+              {{ Math.round(card.proposed_fix.confidence * 100) }}% confident
+            </span>
+          </div>
+        </div>
+
+        <div v-if="card.proposed_fix.explanation" class="fix-explanation">
+          <h4>Explanation</h4>
+          <p>{{ card.proposed_fix.explanation }}</p>
+        </div>
+
+        <div class="fix-diff">
+          <div class="diff-panel">
+            <h4>Original Code</h4>
+            <pre class="code-block original"><code>{{ card.proposed_fix.original_code }}</code></pre>
+          </div>
+
+          <div class="diff-panel">
+            <h4>Fixed Code</h4>
+            <pre class="code-block fixed"><code>{{ card.proposed_fix.fixed_code }}</code></pre>
+          </div>
+        </div>
+
+        <div v-if="!card.proposed_fix.validated" class="validation-errors">
+          <h4>Validation Errors</h4>
+          <div v-for="(error, idx) in card.proposed_fix.validation_errors" :key="idx" class="error-item">
+            {{ error }}
+          </div>
+        </div>
+
+        <div class="fix-actions">
+          <button
+            v-if="card.proposed_fix.validated"
+            class="apply-fix-btn"
+            @click="applyFix"
+            :disabled="applying"
+          >
+            {{ applying ? 'Applying...' : 'Apply Fix' }}
+          </button>
+          <p class="fix-warning" v-if="card.proposed_fix.validated">
+            A backup will be created before applying the fix
+          </p>
+        </div>
+      </div>
+
       <!-- Log Tab -->
       <div v-if="activeTab === 'log'" class="tab-panel">
         <div class="log-entries">
@@ -115,6 +167,7 @@ const card = computed(() => selectedCard.value)
 const agentData = computed(() => selectedAgent.value)
 
 const activeTab = ref('details')
+const applying = ref(false)
 
 const tabs = computed(() => {
   const baseTabs = [
@@ -122,6 +175,10 @@ const tabs = computed(() => {
     { id: 'links', label: 'Links' },
     { id: 'log', label: 'Log' }
   ]
+
+  if (card.value?.proposed_fix) {
+    baseTabs.splice(1, 0, { id: 'fix', label: 'Proposed Fix' })
+  }
 
   if (card.value?.owner_agent) {
     baseTabs.push({ id: 'snoop', label: 'Agent Snoop' })
@@ -165,6 +222,26 @@ const updateStatus = () => {
   const nextStatus = statuses[(currentIndex + 1) % statuses.length]
 
   cardStore.updateCard(card.value.id, { status: nextStatus })
+}
+
+const applyFix = async () => {
+  if (!card.value?.proposed_fix || !card.value.proposed_fix.validated) {
+    return
+  }
+
+  if (!confirm(`Apply this fix to ${card.value.proposed_fix.file_path}?\n\nA backup will be created automatically.`)) {
+    return
+  }
+
+  applying.value = true
+  try {
+    await cardStore.applyFix(card.value.id)
+    alert('Fix applied successfully! A backup was created.')
+  } catch (error) {
+    alert(`Failed to apply fix: ${error.message}`)
+  } finally {
+    applying.value = false
+  }
 }
 
 const renderMarkdown = (text) => {
@@ -409,5 +486,170 @@ const formatTime = (timestamp) => {
 
 .action-btn.secondary:hover {
   background: #3a3a3a;
+}
+
+/* Fix viewer styles */
+.fix-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.fix-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #e0e0e0;
+  margin: 0;
+}
+
+.fix-badges {
+  display: flex;
+  gap: 8px;
+}
+
+.badge {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.badge-success {
+  background: #1a2a1a;
+  color: #5de585;
+}
+
+.badge-error {
+  background: #2a1a1a;
+  color: #e55d5d;
+}
+
+.badge-confidence {
+  background: #1a2a2a;
+  color: #5d9de5;
+}
+
+.fix-explanation {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: #1a1a1a;
+  border-left: 3px solid #00d4aa;
+  border-radius: 4px;
+}
+
+.fix-explanation h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: #888;
+  margin: 0 0 8px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.fix-explanation p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #ccc;
+}
+
+.fix-diff {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.diff-panel h4 {
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+  margin: 0 0 8px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.code-block {
+  margin: 0;
+  padding: 12px;
+  background: #0a0a0a;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.code-block.original {
+  border-left: 3px solid #e55d5d;
+}
+
+.code-block.fixed {
+  border-left: 3px solid #5de585;
+}
+
+.code-block code {
+  color: #e0e0e0;
+  font-family: 'Courier New', monospace;
+}
+
+.validation-errors {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: #2a1a1a;
+  border: 1px solid #e55d5d;
+  border-radius: 4px;
+}
+
+.validation-errors h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e55d5d;
+  margin: 0 0 8px 0;
+}
+
+.error-item {
+  font-size: 12px;
+  color: #e55d5d;
+  margin: 4px 0;
+}
+
+.fix-actions {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #2a2a2a;
+}
+
+.apply-fix-btn {
+  width: 100%;
+  padding: 12px;
+  background: #00d4aa;
+  color: #000;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.apply-fix-btn:hover:not(:disabled) {
+  background: #00ffcc;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 212, 170, 0.3);
+}
+
+.apply-fix-btn:disabled {
+  background: #2a2a2a;
+  color: #666;
+  cursor: not-allowed;
+}
+
+.fix-warning {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #888;
+  text-align: center;
 }
 </style>

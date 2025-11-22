@@ -84,6 +84,18 @@ export const useCardStore = defineStore('cards', () => {
     })
   }
 
+  async function applyFix(cardId) {
+    try {
+      const response = await axios.post(`${API_BASE}/cards/${cardId}/apply-fix`)
+      // Refresh the card to get updated status
+      await fetchCards()
+      return response.data
+    } catch (error) {
+      console.error('Error applying fix:', error)
+      throw error
+    }
+  }
+
   async function analyzeCodebase(path) {
     try {
       isAnalyzing.value = true
@@ -150,6 +162,7 @@ export const useCardStore = defineStore('cards', () => {
     getAgentHierarchy,
     updateCard,
     routeCard,
+    applyFix,
     analyzeCodebase,
     selectCard,
     clearSelection,

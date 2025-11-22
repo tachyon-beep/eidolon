@@ -44,6 +44,7 @@ class Database:
                     metrics TEXT,
                     log TEXT,
                     routing TEXT,
+                    proposed_fix TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
@@ -122,8 +123,8 @@ class Database:
                 INSERT INTO cards (
                     id, type, title, summary, status, priority, owner_agent,
                     parent, children, links, metrics, log, routing,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    proposed_fix, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 card.id,
                 card.type,
@@ -138,6 +139,7 @@ class Database:
                 json.dumps(card.metrics.dict()),
                 json.dumps([log.dict() for log in card.log], default=str),
                 json.dumps(card.routing.dict()),
+                json.dumps(card.proposed_fix.dict()) if card.proposed_fix else None,
                 card.created_at.isoformat(),
                 card.updated_at.isoformat()
             ))
@@ -193,7 +195,7 @@ class Database:
                 UPDATE cards SET
                     type = ?, title = ?, summary = ?, status = ?, priority = ?,
                     owner_agent = ?, parent = ?, children = ?, links = ?,
-                    metrics = ?, log = ?, routing = ?, updated_at = ?
+                    metrics = ?, log = ?, routing = ?, proposed_fix = ?, updated_at = ?
                 WHERE id = ?
             """, (
                 card.type,
@@ -208,6 +210,7 @@ class Database:
                 json.dumps(card.metrics.dict()),
                 json.dumps([log.dict() for log in card.log], default=str),
                 json.dumps(card.routing.dict()),
+                json.dumps(card.proposed_fix.dict()) if card.proposed_fix else None,
                 card.updated_at.isoformat(),
                 card.id
             ))
@@ -323,6 +326,7 @@ class Database:
             metrics=json.loads(row["metrics"]),
             log=json.loads(row["log"]),
             routing=json.loads(row["routing"]),
+            proposed_fix=json.loads(row["proposed_fix"]) if row["proposed_fix"] else None,
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"])
         )

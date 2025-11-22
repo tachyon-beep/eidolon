@@ -56,6 +56,19 @@ class Routing(BaseModel):
     to_tab: Optional[str] = None
 
 
+class ProposedFix(BaseModel):
+    """Represents a proposed code fix"""
+    original_code: str = Field(..., description="Original code snippet")
+    fixed_code: str = Field(..., description="Fixed code snippet")
+    explanation: str = Field(..., description="Explanation of the fix")
+    file_path: str = Field(..., description="File to be modified")
+    line_start: int = Field(..., description="Start line of the fix")
+    line_end: int = Field(..., description="End line of the fix")
+    confidence: float = Field(default=0.8, ge=0.0, le=1.0, description="Confidence in fix")
+    validated: bool = Field(default=False, description="Whether fix has been AST validated")
+    validation_errors: List[str] = Field(default_factory=list, description="Validation errors if any")
+
+
 class Card(BaseModel):
     id: str = Field(..., description="Unique card ID (MONAD-YYYY-TYPE-SEQ)")
     type: CardType
@@ -70,6 +83,7 @@ class Card(BaseModel):
     metrics: CardMetrics = Field(default_factory=CardMetrics)
     log: List[CardLogEntry] = Field(default_factory=list)
     routing: Routing = Field(default_factory=Routing)
+    proposed_fix: Optional[ProposedFix] = Field(default=None, description="Proposed code fix")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 

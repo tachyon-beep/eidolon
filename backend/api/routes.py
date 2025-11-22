@@ -174,6 +174,72 @@ def create_routes(db: Database, orchestrator: AgentOrchestrator):
             })
             raise HTTPException(status_code=500, detail=str(e))
 
+    # Fix application endpoints
+    @router.post("/cards/{card_id}/apply-fix")
+    async def apply_fix(card_id: str):
+        """Apply a proposed fix to the codebase"""
+        card = await db.get_card(card_id)
+        if not card:
+            raise HTTPException(status_code=404, detail="Card not found")
+
+        if not card.proposed_fix:
+            raise HTTPException(status_code=400, detail="Card has no proposed fix")
+
+        if not card.proposed_fix.validated:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Fix has validation errors: {', '.join(card.proposed_fix.validation_errors)}"
+            )
+
+        try:
+            # Read the current file
+            with open(card.proposed_fix.file_path, 'r') as f:
+                lines = f.readlines()
+
+            # Create backup
+            backup_path = card.proposed_fix.file_path + '.monad_backup'
+            with open(backup_path, 'w') as f:
+                f.writelines(lines)
+
+            # Replace the lines
+            new_lines = (
+                lines[:card.proposed_fix.line_start - 1] +
+                [card.proposed_fix.fixed_code + '\n'] +
+                lines[card.proposed_fix.line_end:]
+            )
+
+            # Write back
+            with open(card.proposed_fix.file_path, 'w') as f:
+                f.writelines(new_lines)
+
+            # Update card status
+            card.update_status(CardStatus.DONE, actor="user")
+            card.add_log_entry(
+                actor="user",
+                event=f"Applied fix to {card.proposed_fix.file_path}",
+                diff={"backup": backup_path}
+            )
+            await db.update_card(card)
+
+            # Broadcast update
+            await manager.broadcast({
+                "type": "fix_applied",
+                "data": {
+                    "card_id": card_id,
+                    "file": card.proposed_fix.file_path,
+                    "backup": backup_path
+                }
+            })
+
+            return {
+                "status": "applied",
+                "file": card.proposed_fix.file_path,
+                "backup": backup_path
+            }
+
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to apply fix: {str(e)}")
+
     # WebSocket endpoint
     @router.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):

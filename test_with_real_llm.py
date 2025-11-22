@@ -6,7 +6,16 @@ to compare against mock LLM performance.
 """
 import asyncio
 import sys
+import os
 from pathlib import Path
+
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    print("⚠️  python-dotenv not installed. Using system environment variables.")
+    pass
 
 # Add backend to path
 sys.path.insert(0, str(Path(__file__).parent / 'backend'))
@@ -27,12 +36,16 @@ async def test_simple_calculator_real_llm():
     db = Database(":memory:")
     await db.connect()
 
-    # Create OpenRouter provider with Grok
+    # Create OpenRouter provider with Grok (reads from .env file)
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        raise ValueError("OPENROUTER_API_KEY not found in .env file")
+
     real_provider = create_provider(
         "openai",
-        api_key="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",
-        base_url="https://openrouter.ai/api/v1",
-        model="x-ai/grok-4.1-fast:free"
+        api_key=api_key,
+        base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+        model=os.getenv("OPENROUTER_MODEL", "x-ai/grok-4.1-fast:free")
     )
 
     print(f"🤖 LLM Provider: {real_provider.get_provider_name()}")
@@ -116,12 +129,16 @@ async def test_rest_api_real_llm():
     db = Database(":memory:")
     await db.connect()
 
-    # Create OpenRouter provider with Grok
+    # Create OpenRouter provider with Grok (reads from .env file)
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        raise ValueError("OPENROUTER_API_KEY not found in .env file")
+
     real_provider = create_provider(
         "openai",
-        api_key="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",
-        base_url="https://openrouter.ai/api/v1",
-        model="x-ai/grok-4.1-fast:free"
+        api_key=api_key,
+        base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+        model=os.getenv("OPENROUTER_MODEL", "x-ai/grok-4.1-fast:free")
     )
 
     print(f"🤖 LLM Provider: {real_provider.get_provider_name()}")

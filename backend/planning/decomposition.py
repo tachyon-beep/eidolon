@@ -199,8 +199,19 @@ class SubsystemDecomposer:
     → token_service.py: Create TokenService for JWT generation
     """
 
-    def __init__(self, llm_provider: LLMProvider):
+    def __init__(self, llm_provider: LLMProvider, use_intelligent_selection: bool = True):
+        """
+        Initialize SubsystemDecomposer with Phase 2.5 improvements
+
+        Args:
+            llm_provider: LLM provider for making API calls
+            use_intelligent_selection: Whether to use intelligent agent role selection (default: True)
+        """
         self.llm_provider = llm_provider
+        self.use_intelligent_selection = use_intelligent_selection
+
+        # Phase 2.5: Intelligent agent selection
+        self.agent_selector = IntelligentAgentSelector(llm_provider) if use_intelligent_selection else None
 
     async def decompose(
         self,
@@ -209,7 +220,7 @@ class SubsystemDecomposer:
         context: Dict[str, Any] = None
     ) -> List[Task]:
         """
-        Decompose subsystem task into module tasks
+        Decompose subsystem task into module tasks using Phase 2.5 improvements
 
         Args:
             task: Subsystem-level task
@@ -221,52 +232,71 @@ class SubsystemDecomposer:
         """
         context = context or {}
 
-        prompt = f"""You are decomposing a subsystem-level task into module-level changes.
+        # Phase 2.5 Step 1: Intelligent agent role selection
+        agent_role = AgentRole.DESIGN  # Default role
+        if self.agent_selector:
+            try:
+                selection = await self.agent_selector.select_agent(
+                    user_request=task.instruction,
+                    project_context={
+                        "subsystem": task.target,
+                        "existing_modules": existing_modules
+                    },
+                    use_llm=True
+                )
+                agent_role = selection["role"]
+                logger.info(
+                    "agent_role_selected",
+                    role=agent_role.value,
+                    confidence=selection.get("confidence", 0.0),
+                    subsystem=task.target
+                )
+            except Exception as e:
+                logger.warning(f"Agent selection failed: {e}, using default DESIGN role")
+                agent_role = AgentRole.DESIGN
 
-Subsystem Task: {task.instruction}
-Target Subsystem: {task.target}
-Existing Modules: {', '.join(existing_modules) if existing_modules else 'None (new subsystem)'}
-
-Your task:
-1. Identify which modules need changes
-2. Decide whether to create new modules or modify existing ones
-3. Define what each module needs to do
-4. Identify dependencies between modules
-
-Respond in JSON format:
-{{
-  "module_tasks": [
-    {{
-      "module": "filename.py",
-      "action": "create_new|modify_existing",
-      "instruction": "What this module needs to do",
-      "dependencies": ["other_module_names"],
-      "complexity": "low|medium|high"
-    }}
-  ]
-}}"""
-
-        response = await self.llm_provider.create_completion(
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=1536,
-            temperature=0.0
+        # Phase 2.5 Step 2: Get role-based prompts
+        prompts = PromptTemplateLibrary.get_subsystem_decomposer_prompt(
+            subsystem_task=task.instruction,
+            target_subsystem=task.target,
+            existing_modules=existing_modules,
+            role=agent_role
         )
 
-        # Parse and create tasks (simplified)
-        import json
+        # Phase 2.5 Step 3: Call LLM with structured output support
         try:
-            plan = json.loads(response.content)
-        except:
-            # Fallback: Use existing modules if available, otherwise create main.py
-            if existing_modules:
-                # Use first existing module (or could use all of them)
-                module_name = existing_modules[0]
+            response = await self.llm_provider.create_completion(
+                messages=[
+                    {"role": "system", "content": prompts["system"]},
+                    {"role": "user", "content": prompts["user"]}
+                ],
+                max_tokens=2048,
+                temperature=0.0,
+                response_format={"type": "json_object"}  # Structured output
+            )
+        except (TypeError, Exception) as e:
+            # Fallback if response_format not supported
+            logger.warning(f"Structured output not supported: {e}, using regular mode")
+            response = await self.llm_provider.create_completion(
+                messages=[
+                    {"role": "system", "content": prompts["system"]},
+                    {"role": "user", "content": prompts["user"]}
+                ],
+                max_tokens=2048,
+                temperature=0.0
+            )
 
-                # Prepend subsystem directory if not root
+        # Phase 2.5 Step 4: Extract JSON with improved parsing
+        plan = extract_json_from_response(response.content)
+
+        if not plan or "module_tasks" not in plan:
+            # Fallback: Use existing modules if available, otherwise create main.py
+            logger.warning("Failed to parse LLM response, using fallback")
+            if existing_modules:
+                module_name = existing_modules[0]
                 if task.target != "root":
                     module_name = f"{task.target}/{module_name}"
             else:
-                # No existing modules, create new one
                 module_name = "main.py" if task.target == "root" else f"{task.target}/main.py"
 
             plan = {
@@ -281,6 +311,7 @@ Respond in JSON format:
                 ]
             }
 
+        # Create Task objects
         tasks = []
         for module_def in plan.get("module_tasks", []):
             t = Task(
@@ -295,6 +326,12 @@ Respond in JSON format:
             )
             tasks.append(t)
 
+        logger.info(
+            "subsystem_decomposition_complete",
+            subsystem=task.target,
+            modules=len(tasks)
+        )
+
         return tasks
 
 
@@ -307,8 +344,19 @@ class ModuleDecomposer:
     → authenticate_user() function: Standalone helper function
     """
 
-    def __init__(self, llm_provider: LLMProvider):
+    def __init__(self, llm_provider: LLMProvider, use_intelligent_selection: bool = True):
+        """
+        Initialize ModuleDecomposer with Phase 2.5 improvements
+
+        Args:
+            llm_provider: LLM provider for making API calls
+            use_intelligent_selection: Whether to use intelligent agent role selection (default: True)
+        """
         self.llm_provider = llm_provider
+        self.use_intelligent_selection = use_intelligent_selection
+
+        # Phase 2.5: Intelligent agent selection
+        self.agent_selector = IntelligentAgentSelector(llm_provider) if use_intelligent_selection else None
 
     async def decompose(
         self,
@@ -318,7 +366,7 @@ class ModuleDecomposer:
         context: Dict[str, Any] = None
     ) -> List[Task]:
         """
-        Decompose module task into class/function tasks
+        Decompose module task into class/function tasks using Phase 2.5 improvements
 
         Args:
             task: Module-level task
@@ -331,61 +379,78 @@ class ModuleDecomposer:
         """
         context = context or {}
 
-        prompt = f"""You are decomposing a module-level task into classes and functions.
+        # Phase 2.5 Step 1: Intelligent agent role selection
+        agent_role = AgentRole.DESIGN  # Default role
+        if self.agent_selector:
+            try:
+                selection = await self.agent_selector.select_agent(
+                    user_request=task.instruction,
+                    project_context={
+                        "module": task.target,
+                        "existing_classes": existing_classes,
+                        "existing_functions": existing_functions
+                    },
+                    use_llm=True
+                )
+                agent_role = selection["role"]
+                logger.info(
+                    "agent_role_selected",
+                    role=agent_role.value,
+                    confidence=selection.get("confidence", 0.0),
+                    module=task.target
+                )
+            except Exception as e:
+                logger.warning(f"Agent selection failed: {e}, using default DESIGN role")
+                agent_role = AgentRole.DESIGN
 
-Module Task: {task.instruction}
-Target Module: {task.target}
-Existing Classes: {', '.join(existing_classes) if existing_classes else 'None'}
-Existing Functions: {', '.join(existing_functions) if existing_functions else 'None'}
-
-Your task:
-1. Identify what classes need to be created or modified
-2. Identify what standalone functions are needed
-3. Define what each class/function needs to do
-
-Respond in JSON format:
-{{
-  "class_tasks": [
-    {{
-      "class_name": "ClassName",
-      "action": "create_new|modify_existing",
-      "instruction": "What this class needs to do",
-      "methods": ["method1", "method2"]
-    }}
-  ],
-  "function_tasks": [
-    {{
-      "function_name": "function_name",
-      "action": "create_new|modify_existing",
-      "instruction": "What this function needs to do"
-    }}
-  ]
-}}"""
-
-        response = await self.llm_provider.create_completion(
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=1536,
-            temperature=0.0
+        # Phase 2.5 Step 2: Get role-based prompts
+        prompts = PromptTemplateLibrary.get_module_decomposer_prompt(
+            module_task=task.instruction,
+            target_module=task.target,
+            existing_classes=existing_classes,
+            existing_functions=existing_functions,
+            role=agent_role
         )
 
-        # Parse and create tasks
-        import json
-        import re
+        # Phase 2.5 Step 3: Call LLM with structured output support
         try:
-            plan = json.loads(response.content)
-        except:
+            response = await self.llm_provider.create_completion(
+                messages=[
+                    {"role": "system", "content": prompts["system"]},
+                    {"role": "user", "content": prompts["user"]}
+                ],
+                max_tokens=2048,
+                temperature=0.0,
+                response_format={"type": "json_object"}  # Structured output
+            )
+        except (TypeError, Exception) as e:
+            # Fallback if response_format not supported
+            logger.warning(f"Structured output not supported: {e}, using regular mode")
+            response = await self.llm_provider.create_completion(
+                messages=[
+                    {"role": "system", "content": prompts["system"]},
+                    {"role": "user", "content": prompts["user"]}
+                ],
+                max_tokens=2048,
+                temperature=0.0
+            )
+
+        # Phase 2.5 Step 4: Extract JSON with improved parsing
+        plan = extract_json_from_response(response.content)
+
+        if not plan or ("class_tasks" not in plan and "function_tasks" not in plan):
             # Fallback: Try to extract function/class names from instruction
+            logger.warning("Failed to parse LLM response, using fallback")
             function_tasks = []
             class_tasks = []
 
+            import re
             # Look for function patterns like "add multiply() function" or "create divide()"
             func_pattern = r'\b(\w+)\s*\([^)]*\)'  # Matches function_name()
             matches = re.findall(func_pattern, task.instruction)
 
             if matches:
-                # Found function names in instruction
                 for func_name in matches:
-                    # Skip common words that aren't function names
                     if func_name.lower() not in ['if', 'when', 'then', 'with', 'for', 'while']:
                         function_tasks.append({
                             "function_name": func_name,
@@ -398,6 +463,7 @@ Respond in JSON format:
                 "function_tasks": function_tasks
             }
 
+        # Create Task objects
         tasks = []
 
         # Create class tasks
@@ -426,6 +492,13 @@ Respond in JSON format:
             )
             tasks.append(t)
 
+        logger.info(
+            "module_decomposition_complete",
+            module=task.target,
+            classes=len(plan.get("class_tasks", [])),
+            functions=len(plan.get("function_tasks", []))
+        )
+
         return tasks
 
 
@@ -439,8 +512,19 @@ class ClassDecomposer:
     → verify_token() method: Validate JWT token
     """
 
-    def __init__(self, llm_provider: LLMProvider):
+    def __init__(self, llm_provider: LLMProvider, use_intelligent_selection: bool = True):
+        """
+        Initialize ClassDecomposer with Phase 2.5 improvements
+
+        Args:
+            llm_provider: LLM provider for making API calls
+            use_intelligent_selection: Whether to use intelligent agent role selection (default: True)
+        """
         self.llm_provider = llm_provider
+        self.use_intelligent_selection = use_intelligent_selection
+
+        # Phase 2.5: Intelligent agent selection
+        self.agent_selector = IntelligentAgentSelector(llm_provider) if use_intelligent_selection else None
 
     async def decompose(
         self,
@@ -449,7 +533,7 @@ class ClassDecomposer:
         context: Dict[str, Any] = None
     ) -> List[Task]:
         """
-        Decompose class task into method tasks
+        Decompose class task into method tasks using Phase 2.5 improvements
 
         Args:
             task: Class-level task
@@ -464,43 +548,70 @@ class ClassDecomposer:
         # Get suggested methods from context or use defaults
         suggested_methods = task.context.get("methods", [])
 
-        prompt = f"""You are decomposing a class-level task into methods.
+        # Phase 2.5 Step 1: Intelligent agent role selection
+        agent_role = AgentRole.DESIGN  # Default role
+        if self.agent_selector:
+            try:
+                selection = await self.agent_selector.select_agent(
+                    user_request=task.instruction,
+                    project_context={
+                        "class": task.target,
+                        "suggested_methods": suggested_methods,
+                        "existing_methods": existing_methods
+                    },
+                    use_llm=True
+                )
+                agent_role = selection["role"]
+                logger.info(
+                    "agent_role_selected",
+                    role=agent_role.value,
+                    confidence=selection.get("confidence", 0.0),
+                    class_name=task.target
+                )
+            except Exception as e:
+                logger.warning(f"Agent selection failed: {e}, using default DESIGN role")
+                agent_role = AgentRole.DESIGN
 
-Class Task: {task.instruction}
-Target Class: {task.target}
-Suggested Methods: {', '.join(suggested_methods) if suggested_methods else 'None'}
-Existing Methods: {', '.join(existing_methods) if existing_methods else 'None'}
-
-Your task:
-1. Define what methods are needed
-2. Specify method signatures
-3. Define what each method needs to do
-
-Respond in JSON format:
-{{
-  "methods": [
-    {{
-      "name": "method_name",
-      "signature": "def method_name(self, param1: type) -> return_type",
-      "instruction": "What this method needs to do",
-      "action": "create_new|modify_existing"
-    }}
-  ]
-}}"""
-
-        response = await self.llm_provider.create_completion(
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=1536,
-            temperature=0.0
+        # Phase 2.5 Step 2: Get role-based prompts
+        prompts = PromptTemplateLibrary.get_class_decomposer_prompt(
+            class_task=task.instruction,
+            target_class=task.target,
+            suggested_methods=suggested_methods,
+            existing_methods=existing_methods,
+            role=agent_role
         )
 
-        # Parse and create tasks
-        import json
+        # Phase 2.5 Step 3: Call LLM with structured output support
         try:
-            plan = json.loads(response.content)
-        except:
+            response = await self.llm_provider.create_completion(
+                messages=[
+                    {"role": "system", "content": prompts["system"]},
+                    {"role": "user", "content": prompts["user"]}
+                ],
+                max_tokens=2048,
+                temperature=0.0,
+                response_format={"type": "json_object"}  # Structured output
+            )
+        except (TypeError, Exception) as e:
+            # Fallback if response_format not supported
+            logger.warning(f"Structured output not supported: {e}, using regular mode")
+            response = await self.llm_provider.create_completion(
+                messages=[
+                    {"role": "system", "content": prompts["system"]},
+                    {"role": "user", "content": prompts["user"]}
+                ],
+                max_tokens=2048,
+                temperature=0.0
+            )
+
+        # Phase 2.5 Step 4: Extract JSON with improved parsing
+        plan = extract_json_from_response(response.content)
+
+        if not plan or "methods" not in plan:
+            logger.warning("Failed to parse LLM response, using fallback")
             plan = {"methods": []}
 
+        # Create Task objects
         tasks = []
         for method_def in plan.get("methods", []):
             t = Task(
@@ -518,6 +629,12 @@ Respond in JSON format:
             )
             tasks.append(t)
 
+        logger.info(
+            "class_decomposition_complete",
+            class_name=task.target,
+            methods=len(tasks)
+        )
+
         return tasks
 
 
@@ -530,8 +647,19 @@ class FunctionPlanner:
     → Generates unit tests
     """
 
-    def __init__(self, llm_provider: LLMProvider):
+    def __init__(self, llm_provider: LLMProvider, use_intelligent_selection: bool = True):
+        """
+        Initialize FunctionPlanner with Phase 2.5 improvements
+
+        Args:
+            llm_provider: LLM provider for making API calls
+            use_intelligent_selection: Whether to use intelligent agent role selection (default: True)
+        """
         self.llm_provider = llm_provider
+        self.use_intelligent_selection = use_intelligent_selection
+
+        # Phase 2.5: Intelligent agent selection
+        self.agent_selector = IntelligentAgentSelector(llm_provider) if use_intelligent_selection else None
 
     async def generate_implementation(
         self,
@@ -539,7 +667,7 @@ class FunctionPlanner:
         context: Dict[str, Any] = None
     ) -> Dict[str, Any]:
         """
-        Generate actual code implementation for function
+        Generate actual code implementation for function using Phase 2.5 improvements
 
         Args:
             task: Function-level task
@@ -552,39 +680,98 @@ class FunctionPlanner:
 
         signature = task.context.get("signature", "")
         module_path = task.target.split("::")[0]
+        function_name = task.target.split("::")[-1]
 
-        prompt = f"""You are generating Python code for a function.
+        # Phase 2.5 Step 1: Intelligent agent role selection
+        # For code generation, default to IMPLEMENTATION role
+        agent_role = AgentRole.IMPLEMENTATION
+        if self.agent_selector:
+            try:
+                selection = await self.agent_selector.select_agent(
+                    user_request=task.instruction,
+                    project_context={
+                        "function": task.target,
+                        "signature": signature,
+                        "module": module_path
+                    },
+                    use_llm=False  # Use heuristic for speed (code gen is always IMPLEMENTATION)
+                )
+                agent_role = selection["role"]
+                logger.info(
+                    "agent_role_selected",
+                    role=agent_role.value,
+                    confidence=selection.get("confidence", 0.0),
+                    function=function_name
+                )
+            except Exception as e:
+                logger.warning(f"Agent selection failed: {e}, using default IMPLEMENTATION role")
+                agent_role = AgentRole.IMPLEMENTATION
 
-Task: {task.instruction}
-Function: {task.target}
-{"Signature: " + signature if signature else ""}
+        # Phase 2.5 Step 2: Get role-based prompts
+        # Build module context string
+        module_context = f"Module: {module_path}\n"
+        if signature:
+            module_context += f"Signature: {signature}\n"
+        module_context += f"Task: {task.instruction}"
 
-Your task:
-1. Generate the complete function implementation
-2. Include proper error handling
-3. Add docstring
-4. Follow best practices
-
-Respond in JSON format:
-{{
-  "code": "def function_name(...):\\n    '''Docstring'''\\n    # implementation",
-  "explanation": "Brief explanation of the implementation"
-}}"""
-
-        response = await self.llm_provider.create_completion(
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=2048,
-            temperature=0.0
+        prompts = PromptTemplateLibrary.get_function_generator_prompt(
+            function_name=function_name,
+            instruction=task.instruction,
+            module_context=module_context,
+            role=agent_role
         )
 
-        # Parse response
-        import json
+        # Phase 2.5 Step 3: Call LLM with structured output support
         try:
-            result = json.loads(response.content)
-        except:
+            response = await self.llm_provider.create_completion(
+                messages=[
+                    {"role": "system", "content": prompts["system"]},
+                    {"role": "user", "content": prompts["user"]}
+                ],
+                max_tokens=3072,  # More tokens for code generation
+                temperature=0.0,
+                response_format={"type": "json_object"}  # Structured output
+            )
+        except (TypeError, Exception) as e:
+            # Fallback if response_format not supported
+            logger.warning(f"Structured output not supported: {e}, using regular mode")
+            response = await self.llm_provider.create_completion(
+                messages=[
+                    {"role": "system", "content": prompts["system"]},
+                    {"role": "user", "content": prompts["user"]}
+                ],
+                max_tokens=3072,
+                temperature=0.0
+            )
+
+        # Phase 2.5 Step 4: Extract JSON or code from response
+        # For code generation, the response might be direct code OR JSON
+        result = None
+
+        # Try extracting JSON first
+        plan = extract_json_from_response(response.content)
+        if plan and "code" in plan:
+            result = plan
+        else:
+            # If no JSON, treat entire response as code
+            logger.warning("No JSON in response, treating as direct code")
             result = {
-                "code": f"def placeholder():\n    '''TODO: {task.instruction}'''\n    pass",
-                "explanation": "Placeholder implementation"
+                "code": response.content.strip(),
+                "explanation": "Generated implementation"
             }
+
+        # Validate we got some code
+        if not result or not result.get("code"):
+            logger.error("Failed to generate code, using placeholder")
+            result = {
+                "code": f"def {function_name}():\n    '''TODO: {task.instruction}'''\n    pass",
+                "explanation": "Placeholder implementation (code generation failed)"
+            }
+
+        logger.info(
+            "function_implementation_complete",
+            function=function_name,
+            code_length=len(result.get("code", ""))
+        )
 
         return result

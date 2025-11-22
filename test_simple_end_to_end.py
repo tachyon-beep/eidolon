@@ -216,7 +216,7 @@ async def run_simple_pipeline():
         "layer1_system": len(subsystem_tasks) > 0,
         "layer2_subsystem": len(module_tasks) > 0 if 'module_tasks' in locals() else False,
         "layer3_module": len(function_tasks) > 0 if 'function_tasks' in locals() else False,
-        "layer4_function": 'implementation' in locals() and implementation.get('code'),
+        "layer4_function": 'implementation' in locals() and bool(implementation.get('code')),
     }
 
     print(f"\n**Pipeline Results:**")

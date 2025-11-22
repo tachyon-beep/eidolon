@@ -150,6 +150,216 @@ Provide ONLY valid JSON matching this format."""
             )
 
     @staticmethod
+    def get_subsystem_decomposer_prompt(
+        subsystem_task: str,
+        target_subsystem: str,
+        existing_modules: List[str],
+        role: AgentRole = AgentRole.DESIGN
+    ) -> Dict[str, str]:
+        """Get prompt for subsystem-level decomposition based on role"""
+
+        if role == AgentRole.DESIGN:
+            return {
+                "system": """You are a software architect decomposing subsystem-level tasks into module-level changes.
+Your goal is to create a clear plan that identifies which modules need changes and what each module needs to do.
+
+Focus on:
+- Identifying which modules to create or modify
+- Writing specific, actionable instructions for each module
+- Understanding module dependencies
+- Organizing related functionality into appropriate modules
+- Following the single responsibility principle""",
+
+                "user": f"""# Subsystem Decomposition Request
+
+Subsystem Task: {subsystem_task}
+Target Subsystem: {target_subsystem}
+Existing Modules: {', '.join(existing_modules) if existing_modules else 'None (new subsystem)'}
+
+Decompose this subsystem task into module-level tasks.
+
+**Important Guidelines:**
+- Identify which modules need to be created or modified
+- Provide specific technical instructions (don't just echo the task)
+- Consider module dependencies (e.g., models before services)
+- Organize related functionality together
+- Use appropriate action types: create_new vs modify_existing
+
+**Example (JWT Authentication Service):**
+```json
+{{
+  "module_tasks": [
+    {{
+      "module": "auth_service.py",
+      "action": "create_new",
+      "instruction": "Create AuthService class with __init__(self, user_repository, jwt_utils), login(username, password) that verifies credentials and returns JWT token, verify_token(token) that validates and returns user_id, logout(token) that adds token to blacklist set.",
+      "dependencies": [],
+      "complexity": "medium"
+    }},
+    {{
+      "module": "token_manager.py",
+      "action": "create_new",
+      "instruction": "Create TokenManager class for managing JWT blacklist. Add is_blacklisted(token) method, add_to_blacklist(token) method. Use in-memory set for storage.",
+      "dependencies": ["auth_service.py"],
+      "complexity": "low"
+    }}
+  ]
+}}
+```
+
+Provide ONLY valid JSON matching this format."""
+            }
+
+        else:
+            return PromptTemplateLibrary.get_subsystem_decomposer_prompt(
+                subsystem_task, target_subsystem, existing_modules, AgentRole.DESIGN
+            )
+
+    @staticmethod
+    def get_module_decomposer_prompt(
+        module_task: str,
+        target_module: str,
+        existing_classes: List[str],
+        existing_functions: List[str],
+        role: AgentRole = AgentRole.DESIGN
+    ) -> Dict[str, str]:
+        """Get prompt for module-level decomposition based on role"""
+
+        if role == AgentRole.DESIGN:
+            return {
+                "system": """You are a software architect decomposing module-level tasks into classes and functions.
+Your goal is to design the internal structure of a module by identifying what classes and functions are needed.
+
+Focus on:
+- Identifying which classes to create or modify
+- Identifying standalone functions that don't belong in classes
+- Writing specific method signatures and responsibilities
+- Organizing code following OOP principles
+- Separating concerns appropriately""",
+
+                "user": f"""# Module Decomposition Request
+
+Module Task: {module_task}
+Target Module: {target_module}
+Existing Classes: {', '.join(existing_classes) if existing_classes else 'None'}
+Existing Functions: {', '.join(existing_functions) if existing_functions else 'None'}
+
+Decompose this module task into class and function tasks.
+
+**Important Guidelines:**
+- Identify classes for stateful objects and related methods
+- Identify standalone functions for utilities and helpers
+- Provide specific method names and responsibilities
+- Use appropriate action types: create_new vs modify_existing
+- Consider what methods each class needs
+
+**Example (Authentication Service Module):**
+```json
+{{
+  "class_tasks": [
+    {{
+      "class_name": "AuthService",
+      "action": "create_new",
+      "instruction": "Create AuthService class for handling authentication. Needs __init__(user_repository, jwt_utils), login(username, password) for authentication, verify_token(token) for validation, logout(token) for session management.",
+      "methods": ["__init__", "login", "verify_token", "logout"]
+    }}
+  ],
+  "function_tasks": [
+    {{
+      "function_name": "hash_password",
+      "action": "create_new",
+      "instruction": "Create standalone function hash_password(password, salt) that uses bcrypt to hash passwords. Returns hash string."
+    }},
+    {{
+      "function_name": "verify_password",
+      "action": "create_new",
+      "instruction": "Create standalone function verify_password(password, password_hash) that verifies password against hash using bcrypt. Returns bool."
+    }}
+  ]
+}}
+```
+
+Provide ONLY valid JSON matching this format."""
+            }
+
+        else:
+            return PromptTemplateLibrary.get_module_decomposer_prompt(
+                module_task, target_module, existing_classes, existing_functions, AgentRole.DESIGN
+            )
+
+    @staticmethod
+    def get_class_decomposer_prompt(
+        class_task: str,
+        target_class: str,
+        suggested_methods: List[str],
+        existing_methods: List[str],
+        role: AgentRole = AgentRole.DESIGN
+    ) -> Dict[str, str]:
+        """Get prompt for class-level decomposition based on role"""
+
+        if role == AgentRole.DESIGN:
+            return {
+                "system": """You are a software architect decomposing class-level tasks into method implementations.
+Your goal is to define what methods are needed in a class and what each method should do.
+
+Focus on:
+- Identifying all necessary methods (including __init__, properties, helpers)
+- Writing specific method signatures with type hints
+- Defining clear responsibilities for each method
+- Following OOP principles (encapsulation, cohesion)
+- Ensuring methods have single, well-defined purposes""",
+
+                "user": f"""# Class Decomposition Request
+
+Class Task: {class_task}
+Target Class: {target_class}
+Suggested Methods: {', '.join(suggested_methods) if suggested_methods else 'None'}
+Existing Methods: {', '.join(existing_methods) if existing_methods else 'None'}
+
+Decompose this class task into method implementations.
+
+**Important Guidelines:**
+- Define method signatures with type hints
+- Specify what each method needs to do
+- Include __init__ if creating a new class
+- Use appropriate action types: create_new vs modify_existing
+- Ensure each method has a single, clear responsibility
+
+**Example (AuthService Class):**
+```json
+{{
+  "methods": [
+    {{
+      "name": "__init__",
+      "signature": "def __init__(self, user_repository: UserRepository, jwt_utils: JWTUtils) -> None",
+      "instruction": "Initialize AuthService with user repository for accessing user data and jwt_utils for token operations. Store as instance variables.",
+      "action": "create_new"
+    }},
+    {{
+      "name": "login",
+      "signature": "def login(self, username: str, password: str) -> Optional[str]",
+      "instruction": "Authenticate user by username/password. Retrieve user from repository, verify password, generate and return JWT token on success. Return None if authentication fails.",
+      "action": "create_new"
+    }},
+    {{
+      "name": "verify_token",
+      "signature": "def verify_token(self, token: str) -> Optional[int]",
+      "instruction": "Validate JWT token. Decode token using jwt_utils, check expiry and signature. Return user_id if valid, None if invalid or expired.",
+      "action": "create_new"
+    }}
+  ]
+}}
+```
+
+Provide ONLY valid JSON matching this format."""
+            }
+
+        else:
+            return PromptTemplateLibrary.get_class_decomposer_prompt(
+                class_task, target_class, suggested_methods, existing_methods, AgentRole.DESIGN
+            )
+
+    @staticmethod
     def get_function_generator_prompt(
         function_name: str,
         instruction: str,

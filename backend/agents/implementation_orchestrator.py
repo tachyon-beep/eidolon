@@ -338,9 +338,16 @@ class ImplementationOrchestrator:
                     module_path = task.target.split("::")[0]
                     function_name = task.target.split("::")[-1]
 
+                    # Read existing content to append to it
+                    module_file = Path(self.project_path) / module_path
+                    existing_content = None
+                    if module_file.exists():
+                        existing_content = module_file.read_text()
+
                     write_result = self.code_writer.write_function(
                         module_path=module_path,
-                        function_code=code
+                        function_code=code,
+                        existing_content=existing_content
                     )
 
                     print(f"   📝 {task.target}: Code written to {module_path}")

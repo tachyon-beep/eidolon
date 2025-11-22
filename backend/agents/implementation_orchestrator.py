@@ -165,7 +165,12 @@ class ImplementationOrchestrator:
             print(f"   Processing subsystem: {subsystem_task.target}")
 
             # Get existing modules in subsystem
-            subsystem_path = Path(self.project_path) / subsystem_task.target
+            # Handle "root" subsystem (no subdirectory)
+            if subsystem_task.target == "root":
+                subsystem_path = Path(self.project_path)
+            else:
+                subsystem_path = Path(self.project_path) / subsystem_task.target
+
             existing_modules = list(subsystem_path.glob("*.py")) if subsystem_path.exists() else []
             existing_module_names = [m.name for m in existing_modules]
 

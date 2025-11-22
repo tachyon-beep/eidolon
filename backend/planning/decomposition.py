@@ -224,11 +224,19 @@ Respond in JSON format:
         try:
             plan = json.loads(response.content)
         except:
+            # Fallback: Use existing modules if available, otherwise create main.py
+            if existing_modules:
+                # Use first existing module (or could use all of them)
+                module_name = existing_modules[0]
+            else:
+                # No existing modules, create new one
+                module_name = "main.py" if task.target == "root" else f"{task.target}/main.py"
+
             plan = {
                 "module_tasks": [
                     {
-                        "module": f"{task.target}/main.py",
-                        "action": "modify_existing",
+                        "module": module_name,
+                        "action": "modify_existing" if existing_modules else "create_new",
                         "instruction": task.instruction,
                         "dependencies": [],
                         "complexity": "medium"
@@ -325,10 +333,33 @@ Respond in JSON format:
 
         # Parse and create tasks
         import json
+        import re
         try:
             plan = json.loads(response.content)
         except:
-            plan = {"class_tasks": [], "function_tasks": []}
+            # Fallback: Try to extract function/class names from instruction
+            function_tasks = []
+            class_tasks = []
+
+            # Look for function patterns like "add multiply() function" or "create divide()"
+            func_pattern = r'\b(\w+)\s*\([^)]*\)'  # Matches function_name()
+            matches = re.findall(func_pattern, task.instruction)
+
+            if matches:
+                # Found function names in instruction
+                for func_name in matches:
+                    # Skip common words that aren't function names
+                    if func_name.lower() not in ['if', 'when', 'then', 'with', 'for', 'while']:
+                        function_tasks.append({
+                            "function_name": func_name,
+                            "action": "create_new",
+                            "instruction": f"Implement {func_name} function"
+                        })
+
+            plan = {
+                "class_tasks": class_tasks,
+                "function_tasks": function_tasks
+            }
 
         tasks = []
 

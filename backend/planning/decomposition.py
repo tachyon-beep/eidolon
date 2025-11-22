@@ -31,19 +31,39 @@ class SystemDecomposer:
     → models subsystem: Add User model with password hashing
     """
 
-    def __init__(self, llm_provider: LLMProvider, use_intelligent_selection: bool = True):
+    def __init__(
+        self,
+        llm_provider: LLMProvider,
+        use_intelligent_selection: bool = True,
+        use_review_loop: bool = True,
+        review_min_score: float = 75.0,
+        review_max_iterations: int = 2
+    ):
         """
-        Initialize SystemDecomposer with Phase 2.5 improvements
+        Initialize SystemDecomposer with Phase 2.5 and Phase 3 improvements
 
         Args:
             llm_provider: LLM provider for making API calls
             use_intelligent_selection: Whether to use intelligent agent role selection (default: True)
+            use_review_loop: Whether to use review-and-revise loops (Phase 3, default: True)
+            review_min_score: Minimum acceptable quality score for review (0-100, default: 75.0)
+            review_max_iterations: Maximum revision attempts (default: 2)
         """
         self.llm_provider = llm_provider
         self.use_intelligent_selection = use_intelligent_selection
+        self.use_review_loop = use_review_loop
+        self.review_min_score = review_min_score
+        self.review_max_iterations = review_max_iterations
 
         # Phase 2.5: Intelligent agent selection
         self.agent_selector = IntelligentAgentSelector(llm_provider) if use_intelligent_selection else None
+
+        # Phase 3: Review loop
+        if use_review_loop:
+            from planning.review_loop import ReviewLoop
+            self.review_loop = ReviewLoop(llm_provider)
+        else:
+            self.review_loop = None
 
     async def decompose(
         self,
@@ -53,7 +73,7 @@ class SystemDecomposer:
         context: Dict[str, Any] = None
     ) -> List[Task]:
         """
-        Decompose user request into subsystem tasks using Phase 2.5 improvements
+        Decompose user request into subsystem tasks using Phase 2.5 and Phase 3 improvements
 
         Args:
             user_request: High-level feature request from user
@@ -66,9 +86,77 @@ class SystemDecomposer:
         """
         context = context or {}
 
+        # Generate initial decomposition plan
+        initial_plan = await self._decompose_internal(
+            user_request, project_path, subsystems, context
+        )
+
+        # Phase 3: Review and revise if enabled
+        if self.review_loop and not context.get("skip_review", False):
+            # Define revision function for review loop
+            async def revise_func(
+                is_revision: bool = True,
+                revision_feedback: str = None,
+                previous_output: Dict[str, Any] = None,
+                **kwargs
+            ) -> Dict[str, Any]:
+                """Revise the decomposition based on review feedback"""
+                revision_context = {
+                    **context,
+                    "is_revision": is_revision,
+                    "revision_feedback": revision_feedback,
+                    "previous_output": previous_output
+                }
+                return await self._decompose_internal(
+                    user_request, project_path, subsystems, revision_context
+                )
+
+            # Run review-and-revise loop
+            final_plan = await self.review_loop.review_and_revise(
+                initial_output=initial_plan,
+                primary_agent_func=revise_func,
+                review_context={
+                    "tier": "system",
+                    "type": "system_decomposition",
+                    "original_request": user_request,
+                    "project_path": project_path,
+                    "subsystems": subsystems
+                },
+                min_score=self.review_min_score,
+                max_iterations=self.review_max_iterations
+            )
+        else:
+            final_plan = initial_plan
+
+        # Convert plan to Task objects
+        return self._plan_to_tasks(final_plan, user_request, project_path, context)
+
+    async def _decompose_internal(
+        self,
+        user_request: str,
+        project_path: str,
+        subsystems: List[str],
+        context: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Internal method: Generate decomposition plan (supports revisions)
+
+        Args:
+            user_request: High-level feature request
+            project_path: Path to project
+            subsystems: List of subsystems
+            context: Additional context (including revision feedback if this is a revision)
+
+        Returns:
+            Decomposition plan dict with subsystem_tasks
+        """
+        context = context or {}
+        is_revision = context.get("is_revision", False)
+        revision_feedback = context.get("revision_feedback", None)
+
         # Phase 2.5 Step 1: Intelligent agent role selection
         agent_role = AgentRole.DESIGN  # Default role
-        if self.agent_selector:
+        if self.agent_selector and not is_revision:  # Only select role once, not on revisions
             try:
                 selection = await self.agent_selector.select_agent(
                     user_request=user_request,
@@ -96,6 +184,10 @@ class SystemDecomposer:
             subsystems=subsystems,
             role=agent_role
         )
+
+        # Phase 3: Add revision feedback to prompt if this is a revision
+        if is_revision and revision_feedback:
+            prompts["user"] += f"\n\n---\n**REVISION REQUEST**\n\nYour previous decomposition received the following review feedback. Please revise to address these issues:\n\n{revision_feedback}\n\nProvide an improved decomposition that addresses all the feedback."
 
         # Phase 2.5 Step 3: Call LLM with structured output support
         try:
@@ -142,6 +234,27 @@ class SystemDecomposer:
                 "overall_complexity": "medium"
             }
 
+        return plan
+
+    def _plan_to_tasks(
+        self,
+        plan: Dict[str, Any],
+        user_request: str,
+        project_path: str,
+        context: Dict[str, Any]
+    ) -> List[Task]:
+        """
+        Convert decomposition plan to Task objects
+
+        Args:
+            plan: Decomposition plan dict with subsystem_tasks
+            user_request: Original user request
+            project_path: Path to project
+            context: Additional context
+
+        Returns:
+            List of Task objects with resolved dependencies
+        """
         # Create Task objects
         tasks = []
         for i, subtask_def in enumerate(plan.get("subsystem_tasks", [])):

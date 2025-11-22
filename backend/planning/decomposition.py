@@ -342,21 +342,40 @@ class ModuleDecomposer:
     Module: "Create AuthService class"
     → AuthService class: Create class with login/verify methods
     → authenticate_user() function: Standalone helper function
+
+    Phase 3: Includes review-and-revise loop for module design quality
     """
 
-    def __init__(self, llm_provider: LLMProvider, use_intelligent_selection: bool = True):
+    def __init__(
+        self,
+        llm_provider: LLMProvider,
+        use_intelligent_selection: bool = True,
+        use_review_loop: bool = True,
+        review_min_score: float = 75.0,
+        review_max_iterations: int = 2
+    ):
         """
-        Initialize ModuleDecomposer with Phase 2.5 improvements
+        Initialize ModuleDecomposer with Phase 2.5 and Phase 3 improvements
 
         Args:
             llm_provider: LLM provider for making API calls
             use_intelligent_selection: Whether to use intelligent agent role selection (default: True)
+            use_review_loop: Whether to use review-and-revise loop (default: True)
+            review_min_score: Minimum quality score for acceptance (default: 75.0)
+            review_max_iterations: Maximum revision iterations (default: 2)
         """
         self.llm_provider = llm_provider
         self.use_intelligent_selection = use_intelligent_selection
+        self.use_review_loop = use_review_loop
+        self.review_min_score = review_min_score
+        self.review_max_iterations = review_max_iterations
 
         # Phase 2.5: Intelligent agent selection
         self.agent_selector = IntelligentAgentSelector(llm_provider) if use_intelligent_selection else None
+
+        # Phase 3: Review loop for quality improvement
+        from planning.review_loop import ReviewLoop
+        self.review_loop = ReviewLoop(llm_provider) if use_review_loop else None
 
     async def decompose(
         self,
@@ -366,7 +385,7 @@ class ModuleDecomposer:
         context: Dict[str, Any] = None
     ) -> List[Task]:
         """
-        Decompose module task into class/function tasks using Phase 2.5 improvements
+        Decompose module task into class/function tasks using Phase 2.5 and Phase 3 improvements
 
         Args:
             task: Module-level task
@@ -379,9 +398,88 @@ class ModuleDecomposer:
         """
         context = context or {}
 
+        # Generate initial decomposition plan
+        initial_plan = await self._decompose_internal(
+            task, existing_classes, existing_functions, context
+        )
+
+        # Phase 3: Review and revise if enabled
+        if self.review_loop and not context.get("skip_review", False):
+            logger.info("starting_review_loop", module=task.target)
+
+            # Wrapper function for revision calls
+            async def revise_func(
+                task=task,
+                existing_classes=existing_classes,
+                existing_functions=existing_functions,
+                context=None,
+                revision_feedback=None,
+                previous_output=None,
+                is_revision=False,
+                **kwargs
+            ):
+                """Wrapper to call _decompose_internal with revision context"""
+                revision_context = {
+                    **(context or {}),
+                    "is_revision": is_revision,
+                    "revision_feedback": revision_feedback,
+                    "previous_output": previous_output
+                }
+                return await self._decompose_internal(
+                    task, existing_classes, existing_functions, revision_context
+                )
+
+            # Review and potentially revise
+            try:
+                final_plan = await self.review_loop.review_and_revise(
+                    initial_output=initial_plan,
+                    primary_agent_func=revise_func,
+                    review_context={
+                        "tier": "module",
+                        "type": "module_decomposition",
+                        "original_request": task.instruction,
+                        "module": task.target
+                    },
+                    min_score=self.review_min_score,
+                    max_iterations=self.review_max_iterations
+                )
+            except Exception as e:
+                logger.error("review_loop_failed", error=str(e))
+                # Use initial plan if review fails
+                final_plan = initial_plan
+        else:
+            # No review loop, use initial plan
+            final_plan = initial_plan
+
+        # Convert final plan to Task objects
+        return self._plan_to_tasks(final_plan, task, context)
+
+    async def _decompose_internal(
+        self,
+        task: Task,
+        existing_classes: List[str],
+        existing_functions: List[str],
+        context: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Internal method to generate decomposition plan (called by both initial and revisions)
+
+        Args:
+            task: Module-level task
+            existing_classes: Existing classes in module
+            existing_functions: Existing functions in module
+            context: Context including revision feedback if this is a revision
+
+        Returns:
+            Dict with decomposition plan (class_tasks, function_tasks)
+        """
+        context = context or {}
+        is_revision = context.get("is_revision", False)
+        revision_feedback = context.get("revision_feedback", None)
+
         # Phase 2.5 Step 1: Intelligent agent role selection
         agent_role = AgentRole.DESIGN  # Default role
-        if self.agent_selector:
+        if self.agent_selector and not is_revision:
             try:
                 selection = await self.agent_selector.select_agent(
                     user_request=task.instruction,
@@ -411,6 +509,10 @@ class ModuleDecomposer:
             existing_functions=existing_functions,
             role=agent_role
         )
+
+        # Phase 3: Add revision feedback to prompt if this is a revision
+        if is_revision and revision_feedback:
+            prompts["user"] += f"\n\n---\n**REVISION REQUEST**\n\nYour previous decomposition received the following review feedback. Please revise to address these issues:\n\n{revision_feedback}\n\nProvide an improved decomposition that addresses all the feedback."
 
         # Phase 2.5 Step 3: Call LLM with structured output support
         try:
@@ -463,19 +565,35 @@ class ModuleDecomposer:
                 "function_tasks": function_tasks
             }
 
-        # Create Task objects
+        logger.info(
+            "module_plan_generated",
+            module=task.target,
+            classes=len(plan.get("class_tasks", [])),
+            functions=len(plan.get("function_tasks", [])),
+            is_revision=is_revision
+        )
+
+        return plan
+
+    def _plan_to_tasks(
+        self,
+        plan: Dict[str, Any],
+        parent_task: Task,
+        context: Dict[str, Any]
+    ) -> List[Task]:
+        """Convert decomposition plan to Task objects"""
         tasks = []
 
         # Create class tasks
         for class_def in plan.get("class_tasks", []):
             t = Task(
                 id=f"T-CLS-{uuid.uuid4().hex[:8]}",
-                parent_task_id=task.id,
+                parent_task_id=parent_task.id,
                 type=TaskType(class_def.get("action", "create_new")),
                 scope="CLASS",
-                target=f"{task.target}::{class_def.get('class_name', 'UnknownClass')}",
+                target=f"{parent_task.target}::{class_def.get('class_name', 'UnknownClass')}",
                 instruction=class_def.get("instruction", ""),
-                context={**task.context, "methods": class_def.get("methods", []), **context}
+                context={**parent_task.context, "methods": class_def.get("methods", []), **context}
             )
             tasks.append(t)
 
@@ -483,18 +601,19 @@ class ModuleDecomposer:
         for func_def in plan.get("function_tasks", []):
             t = Task(
                 id=f"T-FNC-{uuid.uuid4().hex[:8]}",
-                parent_task_id=task.id,
+                parent_task_id=parent_task.id,
                 type=TaskType(func_def.get("action", "create_new")),
                 scope="FUNCTION",
-                target=f"{task.target}::{func_def.get('function_name', 'unknown_function')}",
+                target=f"{parent_task.target}::{func_def.get('function_name', 'unknown_function')}",
                 instruction=func_def.get("instruction", ""),
-                context={**task.context, **context}
+                context={**parent_task.context, **context}
             )
             tasks.append(t)
 
         logger.info(
             "module_decomposition_complete",
-            module=task.target,
+            module=parent_task.target,
+            total_tasks=len(tasks),
             classes=len(plan.get("class_tasks", [])),
             functions=len(plan.get("function_tasks", []))
         )
@@ -510,21 +629,40 @@ class ClassDecomposer:
     → __init__() method: Initialize dependencies
     → login() method: Authenticate and generate token
     → verify_token() method: Validate JWT token
+
+    Phase 3: Includes review-and-revise loop for class design quality
     """
 
-    def __init__(self, llm_provider: LLMProvider, use_intelligent_selection: bool = True):
+    def __init__(
+        self,
+        llm_provider: LLMProvider,
+        use_intelligent_selection: bool = True,
+        use_review_loop: bool = True,
+        review_min_score: float = 75.0,
+        review_max_iterations: int = 2
+    ):
         """
-        Initialize ClassDecomposer with Phase 2.5 improvements
+        Initialize ClassDecomposer with Phase 2.5 and Phase 3 improvements
 
         Args:
             llm_provider: LLM provider for making API calls
             use_intelligent_selection: Whether to use intelligent agent role selection (default: True)
+            use_review_loop: Whether to use review-and-revise loop (default: True)
+            review_min_score: Minimum quality score for acceptance (default: 75.0)
+            review_max_iterations: Maximum revision iterations (default: 2)
         """
         self.llm_provider = llm_provider
         self.use_intelligent_selection = use_intelligent_selection
+        self.use_review_loop = use_review_loop
+        self.review_min_score = review_min_score
+        self.review_max_iterations = review_max_iterations
 
         # Phase 2.5: Intelligent agent selection
         self.agent_selector = IntelligentAgentSelector(llm_provider) if use_intelligent_selection else None
+
+        # Phase 3: Review loop for quality improvement
+        from planning.review_loop import ReviewLoop
+        self.review_loop = ReviewLoop(llm_provider) if use_review_loop else None
 
     async def decompose(
         self,
@@ -533,7 +671,7 @@ class ClassDecomposer:
         context: Dict[str, Any] = None
     ) -> List[Task]:
         """
-        Decompose class task into method tasks using Phase 2.5 improvements
+        Decompose class task into method tasks using Phase 2.5 and Phase 3 improvements
 
         Args:
             task: Class-level task
@@ -545,12 +683,91 @@ class ClassDecomposer:
         """
         context = context or {}
 
-        # Get suggested methods from context or use defaults
+        # Get suggested methods from context
         suggested_methods = task.context.get("methods", [])
+
+        # Generate initial decomposition plan
+        initial_plan = await self._decompose_internal(
+            task, suggested_methods, existing_methods, context
+        )
+
+        # Phase 3: Review and revise if enabled
+        if self.review_loop and not context.get("skip_review", False):
+            logger.info("starting_review_loop", class_name=task.target)
+
+            # Wrapper function for revision calls
+            async def revise_func(
+                task=task,
+                suggested_methods=suggested_methods,
+                existing_methods=existing_methods,
+                context=None,
+                revision_feedback=None,
+                previous_output=None,
+                is_revision=False,
+                **kwargs
+            ):
+                """Wrapper to call _decompose_internal with revision context"""
+                revision_context = {
+                    **(context or {}),
+                    "is_revision": is_revision,
+                    "revision_feedback": revision_feedback,
+                    "previous_output": previous_output
+                }
+                return await self._decompose_internal(
+                    task, suggested_methods, existing_methods, revision_context
+                )
+
+            # Review and potentially revise
+            try:
+                final_plan = await self.review_loop.review_and_revise(
+                    initial_output=initial_plan,
+                    primary_agent_func=revise_func,
+                    review_context={
+                        "tier": "class",
+                        "type": "class_decomposition",
+                        "original_request": task.instruction,
+                        "class_name": task.target
+                    },
+                    min_score=self.review_min_score,
+                    max_iterations=self.review_max_iterations
+                )
+            except Exception as e:
+                logger.error("review_loop_failed", error=str(e))
+                # Use initial plan if review fails
+                final_plan = initial_plan
+        else:
+            # No review loop, use initial plan
+            final_plan = initial_plan
+
+        # Convert final plan to Task objects
+        return self._plan_to_tasks(final_plan, task, context)
+
+    async def _decompose_internal(
+        self,
+        task: Task,
+        suggested_methods: List[str],
+        existing_methods: List[str],
+        context: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Internal method to generate decomposition plan (called by both initial and revisions)
+
+        Args:
+            task: Class-level task
+            suggested_methods: Suggested methods from parent
+            existing_methods: Existing methods in class
+            context: Context including revision feedback if this is a revision
+
+        Returns:
+            Dict with decomposition plan (methods)
+        """
+        context = context or {}
+        is_revision = context.get("is_revision", False)
+        revision_feedback = context.get("revision_feedback", None)
 
         # Phase 2.5 Step 1: Intelligent agent role selection
         agent_role = AgentRole.DESIGN  # Default role
-        if self.agent_selector:
+        if self.agent_selector and not is_revision:
             try:
                 selection = await self.agent_selector.select_agent(
                     user_request=task.instruction,
@@ -580,6 +797,10 @@ class ClassDecomposer:
             existing_methods=existing_methods,
             role=agent_role
         )
+
+        # Phase 3: Add revision feedback to prompt if this is a revision
+        if is_revision and revision_feedback:
+            prompts["user"] += f"\n\n---\n**REVISION REQUEST**\n\nYour previous decomposition received the following review feedback. Please revise to address these issues:\n\n{revision_feedback}\n\nProvide an improved decomposition that addresses all the feedback."
 
         # Phase 2.5 Step 3: Call LLM with structured output support
         try:
@@ -611,18 +832,33 @@ class ClassDecomposer:
             logger.warning("Failed to parse LLM response, using fallback")
             plan = {"methods": []}
 
-        # Create Task objects
+        logger.info(
+            "class_plan_generated",
+            class_name=task.target,
+            methods=len(plan.get("methods", [])),
+            is_revision=is_revision
+        )
+
+        return plan
+
+    def _plan_to_tasks(
+        self,
+        plan: Dict[str, Any],
+        parent_task: Task,
+        context: Dict[str, Any]
+    ) -> List[Task]:
+        """Convert decomposition plan to Task objects"""
         tasks = []
         for method_def in plan.get("methods", []):
             t = Task(
                 id=f"T-MTH-{uuid.uuid4().hex[:8]}",
-                parent_task_id=task.id,
+                parent_task_id=parent_task.id,
                 type=TaskType(method_def.get("action", "create_new")),
                 scope="FUNCTION",
-                target=f"{task.target}.{method_def.get('name', 'unknown_method')}",
+                target=f"{parent_task.target}.{method_def.get('name', 'unknown_method')}",
                 instruction=method_def.get("instruction", ""),
                 context={
-                    **task.context,
+                    **parent_task.context,
                     "signature": method_def.get("signature", ""),
                     **context
                 }
@@ -631,8 +867,8 @@ class ClassDecomposer:
 
         logger.info(
             "class_decomposition_complete",
-            class_name=task.target,
-            methods=len(tasks)
+            class_name=parent_task.target,
+            total_methods=len(tasks)
         )
 
         return tasks

@@ -6,9 +6,10 @@ Supports multiple LLM providers with a unified interface:
 - OpenAI (GPT-4, GPT-4 Turbo)
 - OpenRouter (any model via OpenAI-compatible API)
 - Together.ai, Groq, etc. (any OpenAI-compatible endpoint)
+- Mock (for testing and demos - no API calls)
 
 Configuration via environment variables:
-- LLM_PROVIDER: "anthropic" or "openai" (default: "anthropic")
+- LLM_PROVIDER: "anthropic", "openai", or "mock" (default: "anthropic")
 - ANTHROPIC_API_KEY: For Anthropic/Claude
 - OPENAI_API_KEY: For OpenAI or compatible providers
 - OPENAI_BASE_URL: For OpenRouter, Together.ai, etc. (optional)
@@ -298,10 +299,13 @@ def create_provider(
         return AnthropicProvider(**kwargs)
     elif provider_type == "openai":
         return OpenAICompatibleProvider(**kwargs)
+    elif provider_type == "mock":
+        from llm_providers.mock_provider import MockLLMProvider
+        return MockLLMProvider(**kwargs)
     else:
         raise ValueError(
             f"Unknown provider: {provider_type}. "
-            f"Supported providers: 'anthropic', 'openai'"
+            f"Supported providers: 'anthropic', 'openai', 'mock'"
         )
 
 

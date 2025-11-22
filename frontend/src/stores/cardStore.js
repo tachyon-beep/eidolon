@@ -11,6 +11,7 @@ export const useCardStore = defineStore('cards', () => {
   const selectedCard = ref(null)
   const selectedAgent = ref(null)
   const isAnalyzing = ref(false)
+  const analysisProgress = ref(null)
 
   // Actions
   async function fetchCards(filters = {}) {
@@ -133,14 +134,20 @@ export const useCardStore = defineStore('cards', () => {
         break
       case 'analysis_started':
         isAnalyzing.value = true
+        analysisProgress.value = null
+        break
+      case 'analysis_progress':
+        analysisProgress.value = message.data
         break
       case 'analysis_completed':
         isAnalyzing.value = false
+        analysisProgress.value = null
         fetchCards()
         fetchAgents()
         break
       case 'analysis_error':
         isAnalyzing.value = false
+        analysisProgress.value = null
         console.error('Analysis error:', message.data.error)
         break
     }
@@ -153,6 +160,7 @@ export const useCardStore = defineStore('cards', () => {
     selectedCard,
     selectedAgent,
     isAnalyzing,
+    analysisProgress,
 
     // Actions
     fetchCards,

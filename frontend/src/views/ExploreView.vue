@@ -24,9 +24,33 @@
     </div>
 
     <div v-if="isAnalyzing" class="analysis-progress">
-      <div class="progress-indicator">
-        <div class="spinner"></div>
-        <span>Deploying hierarchical agent mesh...</span>
+      <div class="progress-header">
+        <div class="progress-title">
+          <div class="spinner"></div>
+          <span>Deploying hierarchical agent mesh...</span>
+        </div>
+        <div class="progress-percentage">{{ progressPercentage }}%</div>
+      </div>
+
+      <div v-if="analysisProgress" class="progress-details">
+        <div class="progress-bar-container">
+          <div class="progress-bar" :style="{ width: progressPercentage + '%' }"></div>
+        </div>
+
+        <div class="progress-stats">
+          <div class="stat-item">
+            <span class="stat-label">Modules:</span>
+            <span class="stat-value">{{ analysisProgress.completed_modules }} / {{ analysisProgress.total_modules }}</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Functions:</span>
+            <span class="stat-value">{{ analysisProgress.completed_functions }} / {{ analysisProgress.total_functions }}</span>
+          </div>
+          <div v-if="analysisProgress.errors && analysisProgress.errors.length > 0" class="stat-item error">
+            <span class="stat-label">Errors:</span>
+            <span class="stat-value">{{ analysisProgress.errors.length }}</span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -88,7 +112,7 @@ import CardTile from '../components/CardTile.vue'
 import AgentTree from '../components/AgentTree.vue'
 
 const cardStore = useCardStore()
-const { cards, agents, isAnalyzing } = storeToRefs(cardStore)
+const { cards, agents, isAnalyzing, analysisProgress } = storeToRefs(cardStore)
 
 const analysisPath = ref('../examples')
 const filters = ref({
@@ -112,6 +136,19 @@ const filteredCards = computed(() => {
 
 const systemAgent = computed(() => {
   return agents.value.find(a => a.scope === 'System')
+})
+
+const progressPercentage = computed(() => {
+  if (!analysisProgress.value) return 0
+  const { total_modules, completed_modules, total_functions, completed_functions } = analysisProgress.value
+
+  if (total_modules === 0 && total_functions === 0) return 0
+
+  // Weight: 30% modules, 70% functions (since there are more functions)
+  const moduleProgress = total_modules > 0 ? (completed_modules / total_modules) * 0.3 : 0
+  const functionProgress = total_functions > 0 ? (completed_functions / total_functions) * 0.7 : 0
+
+  return Math.round((moduleProgress + functionProgress) * 100)
 })
 
 const startAnalysis = async () => {
@@ -210,12 +247,77 @@ onMounted(() => {
   border-radius: 8px;
 }
 
-.progress-indicator {
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.progress-title {
   display: flex;
   align-items: center;
   gap: 12px;
   font-size: 14px;
   color: #00d4aa;
+  font-weight: 500;
+}
+
+.progress-percentage {
+  font-size: 18px;
+  font-weight: 700;
+  color: #00d4aa;
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-details {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.progress-bar-container {
+  width: 100%;
+  height: 8px;
+  background: #111;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid #2a2a2a;
+}
+
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #00d4aa, #00ffcc);
+  border-radius: 4px;
+  transition: width 0.5s ease-out;
+}
+
+.progress-stats {
+  display: flex;
+  gap: 24px;
+}
+
+.stat-item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.stat-label {
+  color: #888;
+  font-weight: 500;
+}
+
+.stat-value {
+  color: #e0e0e0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-item.error .stat-label,
+.stat-item.error .stat-value {
+  color: #ff6b6b;
 }
 
 .spinner {

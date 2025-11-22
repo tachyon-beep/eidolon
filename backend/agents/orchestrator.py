@@ -12,9 +12,11 @@ from storage import Database
 
 
 class AgentOrchestrator:
-    """Orchestrates the hierarchical agent system"""
+    """Orchestrates the hierarchical agent system with parallel execution"""
 
-    def __init__(self, db: Database, api_key: Optional[str] = None):
+    def __init__(self, db: Database, api_key: Optional[str] = None,
+                 max_concurrent_functions: int = 10,
+                 max_concurrent_modules: int = 3):
         self.db = db
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         if not self.api_key:
@@ -23,6 +25,21 @@ class AgentOrchestrator:
         self.client = AsyncAnthropic(api_key=self.api_key)
         self.analyzer = CodeAnalyzer()
         self.call_graph = None  # Will be populated during analysis
+
+        # Concurrency control
+        self.max_concurrent_functions = max_concurrent_functions
+        self.max_concurrent_modules = max_concurrent_modules
+        self.function_semaphore = asyncio.Semaphore(max_concurrent_functions)
+        self.module_semaphore = asyncio.Semaphore(max_concurrent_modules)
+
+        # Progress tracking
+        self.progress = {
+            'total_modules': 0,
+            'completed_modules': 0,
+            'total_functions': 0,
+            'completed_functions': 0,
+            'errors': []
+        }
 
     async def analyze_codebase(self, path: str) -> Agent:
         """
@@ -47,13 +64,42 @@ class AgentOrchestrator:
         self.call_graph = self.analyzer.build_call_graph(modules)
         print(f"Call graph built: {len(self.call_graph['functions'])} functions, {len(self.call_graph['orphaned'])} orphaned")
 
-        # Deploy module-level agents
-        for module_info in modules:
-            module_agent = await self._deploy_module_agent(
-                system_agent.id,
-                module_info
-            )
-            system_agent.children_ids.append(module_agent.id)
+        # Initialize progress tracking
+        total_functions = sum(
+            len(m.functions) + sum(len(c.methods) for c in m.classes)
+            for m in modules
+        )
+        self.progress = {
+            'total_modules': len(modules),
+            'completed_modules': 0,
+            'total_functions': total_functions,
+            'completed_functions': 0,
+            'errors': []
+        }
+        print(f"Starting parallel analysis: {len(modules)} modules, {total_functions} functions")
+        print(f"Concurrency: {self.max_concurrent_modules} modules, {self.max_concurrent_functions} functions")
+
+        # Deploy module-level agents IN PARALLEL
+        module_tasks = [
+            self._deploy_module_agent(system_agent.id, module_info)
+            for module_info in modules
+        ]
+
+        # Run all module agents concurrently and collect results
+        module_agents = await asyncio.gather(*module_tasks, return_exceptions=True)
+
+        # Process results and track errors
+        for i, result in enumerate(module_agents):
+            if isinstance(result, Exception):
+                error_msg = f"Module {modules[i].file_path} failed: {str(result)}"
+                print(f"ERROR: {error_msg}")
+                self.progress['errors'].append(error_msg)
+            else:
+                system_agent.children_ids.append(result.id)
+
+        print(f"Analysis complete: {self.progress['completed_modules']}/{len(modules)} modules, "
+              f"{self.progress['completed_functions']}/{total_functions} functions, "
+              f"{len(self.progress['errors'])} errors")
 
         # Run system-level analysis
         await self._run_system_analysis(system_agent, modules)
@@ -65,47 +111,65 @@ class AgentOrchestrator:
         return system_agent
 
     async def _deploy_module_agent(self, parent_id: str, module_info: ModuleInfo) -> Agent:
-        """Deploy an agent for a module (file)"""
-        module_agent = Agent(
-            id="",
-            scope=AgentScope.MODULE,
-            target=module_info.file_path,
-            status=AgentStatus.ANALYZING,
-            parent_id=parent_id
-        )
-        module_agent = await self.db.create_agent(module_agent)
-
-        # Deploy function-level agents for each function and method
-        function_agents = []
-
-        for func in module_info.functions:
-            func_agent = await self._deploy_function_agent(
-                module_agent.id,
-                module_info,
-                func.name,
-                func
+        """Deploy an agent for a module (file) with parallel function analysis"""
+        # Use semaphore for rate limiting at module level
+        async with self.module_semaphore:
+            module_agent = Agent(
+                id="",
+                scope=AgentScope.MODULE,
+                target=module_info.file_path,
+                status=AgentStatus.ANALYZING,
+                parent_id=parent_id
             )
-            function_agents.append(func_agent)
-            module_agent.children_ids.append(func_agent.id)
+            module_agent = await self.db.create_agent(module_agent)
 
-        for cls in module_info.classes:
-            for method in cls.methods:
-                func_agent = await self._deploy_function_agent(
+            # Collect all function/method tasks
+            function_tasks = []
+
+            for func in module_info.functions:
+                task = self._deploy_function_agent(
                     module_agent.id,
                     module_info,
-                    f"{cls.name}.{method.name}",
-                    method
+                    func.name,
+                    func
                 )
-                function_agents.append(func_agent)
-                module_agent.children_ids.append(func_agent.id)
+                function_tasks.append(task)
 
-        # Run module-level analysis
-        await self._run_module_analysis(module_agent, module_info, function_agents)
+            for cls in module_info.classes:
+                for method in cls.methods:
+                    task = self._deploy_function_agent(
+                        module_agent.id,
+                        module_info,
+                        f"{cls.name}.{method.name}",
+                        method
+                    )
+                    function_tasks.append(task)
 
-        module_agent.update_status(AgentStatus.COMPLETED)
-        await self.db.update_agent(module_agent)
+            # Run ALL function agents IN PARALLEL
+            function_agents = await asyncio.gather(*function_tasks, return_exceptions=True)
 
-        return module_agent
+            # Process results and track errors
+            valid_agents = []
+            for i, result in enumerate(function_agents):
+                if isinstance(result, Exception):
+                    error_msg = f"Function analysis failed: {str(result)}"
+                    print(f"  ERROR: {error_msg}")
+                    self.progress['errors'].append(error_msg)
+                else:
+                    valid_agents.append(result)
+                    module_agent.children_ids.append(result.id)
+
+            # Run module-level analysis
+            await self._run_module_analysis(module_agent, module_info, valid_agents)
+
+            module_agent.update_status(AgentStatus.COMPLETED)
+            await self.db.update_agent(module_agent)
+
+            # Update progress
+            self.progress['completed_modules'] += 1
+            print(f"  Module {self.progress['completed_modules']}/{self.progress['total_modules']} complete: {module_info.file_path}")
+
+            return module_agent
 
     async def _deploy_function_agent(
         self,
@@ -114,23 +178,28 @@ class AgentOrchestrator:
         func_name: str,
         func_info: Any
     ) -> Agent:
-        """Deploy an agent for a function"""
-        func_agent = Agent(
-            id="",
-            scope=AgentScope.FUNCTION,
-            target=f"{module_info.file_path}::{func_name}",
-            status=AgentStatus.ANALYZING,
-            parent_id=parent_id
-        )
-        func_agent = await self.db.create_agent(func_agent)
+        """Deploy an agent for a function with rate limiting"""
+        # Use semaphore for rate limiting (respects API limits)
+        async with self.function_semaphore:
+            func_agent = Agent(
+                id="",
+                scope=AgentScope.FUNCTION,
+                target=f"{module_info.file_path}::{func_name}",
+                status=AgentStatus.ANALYZING,
+                parent_id=parent_id
+            )
+            func_agent = await self.db.create_agent(func_agent)
 
-        # Analyze the function
-        await self._run_function_analysis(func_agent, module_info, func_info)
+            # Analyze the function
+            await self._run_function_analysis(func_agent, module_info, func_info)
 
-        func_agent.update_status(AgentStatus.COMPLETED)
-        await self.db.update_agent(func_agent)
+            func_agent.update_status(AgentStatus.COMPLETED)
+            await self.db.update_agent(func_agent)
 
-        return func_agent
+            # Update progress
+            self.progress['completed_functions'] += 1
+
+            return func_agent
 
     async def _run_function_analysis(self, agent: Agent, module_info: ModuleInfo, func_info: Any):
         """Run AI-powered analysis on a function with cross-file context"""
@@ -462,3 +531,13 @@ Focus on the big picture and prioritize actionable insights."""
             }
 
         return await build_tree(root)
+
+    def get_progress(self) -> Dict[str, Any]:
+        """Get current analysis progress"""
+        return {
+            **self.progress,
+            'percentage': round(
+                (self.progress['completed_functions'] / self.progress['total_functions'] * 100)
+                if self.progress['total_functions'] > 0 else 0
+            )
+        }

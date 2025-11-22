@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
+import asyncio
 
 from models import Card, CardStatus, Agent
 from storage import Database
@@ -135,9 +136,14 @@ def create_routes(db: Database, orchestrator: AgentOrchestrator):
         return hierarchy
 
     # Analysis endpoints
+    @router.get("/progress")
+    def get_progress():
+        """Get current analysis progress"""
+        return orchestrator.get_progress()
+
     @router.post("/analyze")
     async def analyze_codebase(request: AnalyzeRequest):
-        """Start analyzing a codebase"""
+        """Start analyzing a codebase with parallel execution and progress tracking"""
         try:
             # Notify clients that analysis is starting
             await manager.broadcast({
@@ -145,18 +151,47 @@ def create_routes(db: Database, orchestrator: AgentOrchestrator):
                 "data": {"path": request.path}
             })
 
+            # Start a background task to send progress updates
+            async def send_progress_updates():
+                while True:
+                    await asyncio.sleep(2)  # Send updates every 2 seconds
+                    progress = orchestrator.get_progress()
+
+                    # Stop if analysis is complete
+                    if progress['completed_modules'] >= progress['total_modules']:
+                        break
+
+                    await manager.broadcast({
+                        "type": "analysis_progress",
+                        "data": progress
+                    })
+
+            # Start progress updates task (don't await it)
+            progress_task = asyncio.create_task(send_progress_updates())
+
             # Run analysis (this could take a while)
             system_agent = await orchestrator.analyze_codebase(request.path)
 
+            # Cancel progress updates
+            progress_task.cancel()
+            try:
+                await progress_task
+            except asyncio.CancelledError:
+                pass
+
             # Get all cards created during analysis
             cards = await db.get_all_cards()
+
+            # Get final progress with errors
+            final_progress = orchestrator.get_progress()
 
             # Notify clients that analysis is complete
             await manager.broadcast({
                 "type": "analysis_completed",
                 "data": {
                     "agent_id": system_agent.id,
-                    "cards_count": len(cards)
+                    "cards_count": len(cards),
+                    "progress": final_progress
                 }
             })
 
@@ -164,6 +199,7 @@ def create_routes(db: Database, orchestrator: AgentOrchestrator):
                 "status": "completed",
                 "agent_id": system_agent.id,
                 "cards_created": len(cards),
+                "progress": final_progress,
                 "hierarchy": await orchestrator.get_agent_hierarchy(system_agent.id)
             }
 

@@ -276,6 +276,29 @@ def create_routes(db: Database, orchestrator: AgentOrchestrator):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to apply fix: {str(e)}")
 
+    # Cache management endpoints
+    @router.get("/cache/stats")
+    async def get_cache_stats():
+        """Get cache statistics"""
+        stats = await orchestrator.get_cache_statistics()
+        return stats
+
+    @router.delete("/cache")
+    async def clear_cache():
+        """Clear the entire analysis cache"""
+        deleted = await orchestrator.clear_cache()
+        await manager.broadcast({
+            "type": "cache_cleared",
+            "data": {"deleted_entries": deleted}
+        })
+        return {"status": "cleared", "deleted_entries": deleted}
+
+    @router.delete("/cache/file")
+    async def invalidate_file_cache(file_path: str):
+        """Invalidate cache for a specific file"""
+        deleted = await orchestrator.invalidate_file_cache(file_path)
+        return {"status": "invalidated", "deleted_entries": deleted, "file_path": file_path}
+
     # WebSocket endpoint
     @router.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):

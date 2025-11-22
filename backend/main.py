@@ -42,6 +42,7 @@ async def startup():
     await db.connect()
 
     orchestrator = AgentOrchestrator(db)
+    await orchestrator.initialize()  # Initialize cache and other async components
 
     # Create and include routes
     router = create_routes(db, orchestrator)

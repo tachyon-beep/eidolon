@@ -9,6 +9,7 @@ from anthropic import AsyncAnthropic
 from models import Agent, AgentScope, AgentStatus, Card, CardType, CardStatus, ProposedFix
 from analysis import CodeAnalyzer, ModuleInfo
 from storage import Database
+from cache import CacheManager
 
 
 class AgentOrchestrator:
@@ -16,7 +17,8 @@ class AgentOrchestrator:
 
     def __init__(self, db: Database, api_key: Optional[str] = None,
                  max_concurrent_functions: int = 10,
-                 max_concurrent_modules: int = 3):
+                 max_concurrent_modules: int = 3,
+                 enable_cache: bool = True):
         self.db = db
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         if not self.api_key:
@@ -25,6 +27,10 @@ class AgentOrchestrator:
         self.client = AsyncAnthropic(api_key=self.api_key)
         self.analyzer = CodeAnalyzer()
         self.call_graph = None  # Will be populated during analysis
+
+        # Cache management
+        self.enable_cache = enable_cache
+        self.cache = CacheManager() if enable_cache else None
 
         # Concurrency control
         self.max_concurrent_functions = max_concurrent_functions
@@ -38,8 +44,15 @@ class AgentOrchestrator:
             'completed_modules': 0,
             'total_functions': 0,
             'completed_functions': 0,
+            'cache_hits': 0,
+            'cache_misses': 0,
             'errors': []
         }
+
+    async def initialize(self):
+        """Initialize the orchestrator (async setup)"""
+        if self.cache:
+            await self.cache.initialize()
 
     async def analyze_codebase(self, path: str) -> Agent:
         """
@@ -178,8 +191,47 @@ class AgentOrchestrator:
         func_name: str,
         func_info: Any
     ) -> Agent:
-        """Deploy an agent for a function with rate limiting"""
-        # Use semaphore for rate limiting (respects API limits)
+        """Deploy an agent for a function with rate limiting and caching"""
+        # Check cache first (outside semaphore to avoid blocking)
+        cached_result = None
+        if self.cache:
+            cached_result = await self.cache.get_cached_result(
+                module_info.file_path,
+                'Function',
+                func_name
+            )
+
+        if cached_result:
+            # Cache hit - restore from cache without API call
+            self.progress['cache_hits'] += 1
+            self.progress['completed_functions'] += 1
+
+            func_agent = Agent(
+                id="",
+                scope=AgentScope.FUNCTION,
+                target=f"{module_info.file_path}::{func_name}",
+                status=AgentStatus.COMPLETED,
+                parent_id=parent_id,
+                findings=cached_result.findings,
+                total_tokens=0,  # No API call made
+                total_cost=0.0
+            )
+            func_agent = await self.db.create_agent(func_agent)
+
+            # Restore cards from cache
+            for card_data in cached_result.cards_data:
+                card = Card(**card_data)
+                card.owner_agent = func_agent.id
+                await self.db.create_card(card)
+                func_agent.cards_created.append(card.id)
+
+            await self.db.update_agent(func_agent)
+
+            return func_agent
+
+        # Cache miss - perform analysis with semaphore
+        self.progress['cache_misses'] += 1
+
         async with self.function_semaphore:
             func_agent = Agent(
                 id="",
@@ -195,6 +247,28 @@ class AgentOrchestrator:
 
             func_agent.update_status(AgentStatus.COMPLETED)
             await self.db.update_agent(func_agent)
+
+            # Store in cache for future use
+            if self.cache:
+                # Collect card data for caching
+                cards_data = []
+                for card_id in func_agent.cards_created:
+                    card = await self.db.get_card(card_id)
+                    if card:
+                        cards_data.append(card.model_dump())
+
+                await self.cache.store_result(
+                    module_info.file_path,
+                    'Function',
+                    func_name,
+                    func_agent.findings,
+                    cards_data,
+                    {
+                        'complexity': func_info.complexity,
+                        'line_count': func_info.line_end - func_info.line_start,
+                        'is_async': func_info.is_async
+                    }
+                )
 
             # Update progress
             self.progress['completed_functions'] += 1
@@ -541,3 +615,39 @@ Focus on the big picture and prioritize actionable insights."""
                 if self.progress['total_functions'] > 0 else 0
             )
         }
+
+    async def get_cache_statistics(self) -> Dict[str, Any]:
+        """Get cache statistics"""
+        if not self.cache:
+            return {
+                'enabled': False,
+                'total_entries': 0,
+                'total_size_bytes': 0,
+                'hit_rate': 0.0
+            }
+
+        stats = await self.cache.get_statistics()
+        return {
+            'enabled': True,
+            'total_entries': stats.total_entries,
+            'total_size_bytes': stats.total_size_bytes,
+            'total_size_mb': round(stats.total_size_bytes / (1024 * 1024), 2),
+            'session_hits': stats.hits,
+            'session_misses': stats.misses,
+            'hit_rate': round(stats.hit_rate, 1),
+            'oldest_entry': stats.oldest_entry,
+            'newest_entry': stats.newest_entry,
+            'most_accessed_file': stats.most_accessed_file
+        }
+
+    async def clear_cache(self) -> int:
+        """Clear the analysis cache"""
+        if not self.cache:
+            return 0
+        return await self.cache.clear_all()
+
+    async def invalidate_file_cache(self, file_path: str) -> int:
+        """Invalidate cache for a specific file"""
+        if not self.cache:
+            return 0
+        return await self.cache.invalidate_file(file_path)

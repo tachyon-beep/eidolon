@@ -12,6 +12,7 @@ export const useCardStore = defineStore('cards', () => {
   const selectedAgent = ref(null)
   const isAnalyzing = ref(false)
   const analysisProgress = ref(null)
+  const cacheStats = ref(null)
 
   // Actions
   async function fetchCards(filters = {}) {
@@ -121,6 +122,26 @@ export const useCardStore = defineStore('cards', () => {
     selectedAgent.value = null
   }
 
+  async function fetchCacheStats() {
+    try {
+      const response = await axios.get(`${API_BASE}/cache/stats`)
+      cacheStats.value = response.data
+    } catch (error) {
+      console.error('Error fetching cache stats:', error)
+    }
+  }
+
+  async function clearCache() {
+    try {
+      const response = await axios.delete(`${API_BASE}/cache`)
+      await fetchCacheStats()
+      return response.data
+    } catch (error) {
+      console.error('Error clearing cache:', error)
+      throw error
+    }
+  }
+
   function handleWebSocketMessage(message) {
     switch (message.type) {
       case 'card_updated':
@@ -150,6 +171,9 @@ export const useCardStore = defineStore('cards', () => {
         analysisProgress.value = null
         console.error('Analysis error:', message.data.error)
         break
+      case 'cache_cleared':
+        fetchCacheStats()
+        break
     }
   }
 
@@ -161,6 +185,7 @@ export const useCardStore = defineStore('cards', () => {
     selectedAgent,
     isAnalyzing,
     analysisProgress,
+    cacheStats,
 
     // Actions
     fetchCards,
@@ -174,6 +199,8 @@ export const useCardStore = defineStore('cards', () => {
     analyzeCodebase,
     selectCard,
     clearSelection,
+    fetchCacheStats,
+    clearCache,
     handleWebSocketMessage
   }
 })

@@ -54,6 +54,37 @@
       </div>
     </div>
 
+    <!-- Cache Statistics -->
+    <div v-if="cacheStats && cacheStats.enabled" class="cache-stats">
+      <div class="cache-header">
+        <div class="cache-title">
+          <span>⚡ Cache Statistics</span>
+          <span class="cache-hit-rate" :class="{ 'high-hit-rate': cacheStats.hit_rate > 50 }">
+            {{ cacheStats.hit_rate }}% hit rate
+          </span>
+        </div>
+        <button @click="handleClearCache" class="clear-cache-btn">Clear Cache</button>
+      </div>
+      <div class="cache-metrics">
+        <div class="cache-metric">
+          <span class="metric-label">Cached Entries:</span>
+          <span class="metric-value">{{ cacheStats.total_entries }}</span>
+        </div>
+        <div class="cache-metric">
+          <span class="metric-label">Cache Size:</span>
+          <span class="metric-value">{{ cacheStats.total_size_mb }} MB</span>
+        </div>
+        <div class="cache-metric">
+          <span class="metric-label">Session Hits:</span>
+          <span class="metric-value">{{ cacheStats.session_hits }}</span>
+        </div>
+        <div class="cache-metric">
+          <span class="metric-label">Session Misses:</span>
+          <span class="metric-value">{{ cacheStats.session_misses }}</span>
+        </div>
+      </div>
+    </div>
+
     <div class="filter-bar">
       <div class="filter-group">
         <label>Type:</label>
@@ -112,7 +143,7 @@ import CardTile from '../components/CardTile.vue'
 import AgentTree from '../components/AgentTree.vue'
 
 const cardStore = useCardStore()
-const { cards, agents, isAnalyzing, analysisProgress } = storeToRefs(cardStore)
+const { cards, agents, isAnalyzing, analysisProgress, cacheStats } = storeToRefs(cardStore)
 
 const analysisPath = ref('../examples')
 const filters = ref({
@@ -163,9 +194,21 @@ const applyFilters = () => {
   // Filters are reactive, so this just triggers the computed
 }
 
+const handleClearCache = async () => {
+  if (confirm('Are you sure you want to clear the entire analysis cache? This cannot be undone.')) {
+    try {
+      await cardStore.clearCache()
+      alert('Cache cleared successfully!')
+    } catch (error) {
+      alert('Failed to clear cache: ' + error.message)
+    }
+  }
+}
+
 onMounted(() => {
   cardStore.fetchCards()
   cardStore.fetchAgents()
+  cardStore.fetchCacheStats()
 })
 </script>
 
@@ -331,6 +374,84 @@ onMounted(() => {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+.cache-stats {
+  padding: 16px 20px;
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+}
+
+.cache-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.cache-title {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+.cache-hit-rate {
+  padding: 4px 10px;
+  background: #2a2a2a;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #888;
+}
+
+.cache-hit-rate.high-hit-rate {
+  background: rgba(0, 212, 170, 0.15);
+  color: #00d4aa;
+}
+
+.clear-cache-btn {
+  padding: 6px 14px;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.clear-cache-btn:hover {
+  background: #ff6b6b;
+  border-color: #ff6b6b;
+  color: #fff;
+}
+
+.cache-metrics {
+  display: flex;
+  gap: 24px;
+}
+
+.cache-metric {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.metric-label {
+  color: #888;
+  font-weight: 500;
+}
+
+.metric-value {
+  color: #e0e0e0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .filter-bar {

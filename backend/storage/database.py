@@ -1,7 +1,7 @@
 import json
 import aiosqlite
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from models import Card, Agent
@@ -80,21 +80,43 @@ class Database:
                 )
             """)
 
+            # Create indices for faster queries
+            await cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_cards_status ON cards(status)
+            """)
+            await cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_cards_owner ON cards(owner_agent)
+            """)
+            await cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_cards_type ON cards(type)
+            """)
+            await cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status)
+            """)
+            await cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_agents_parent ON agents(parent_id)
+            """)
+            await cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_agents_scope ON agents(scope)
+            """)
+
             await self.db.commit()
 
     async def _get_next_sequence(self, name: str) -> int:
-        """Get next sequence number for ID generation"""
-        async with self.db.cursor() as cursor:
-            await cursor.execute(
+        """
+        Get next sequence number for ID generation (thread-safe)
+
+        Uses UPDATE...RETURNING to avoid race conditions in concurrent environments.
+        """
+        async with self.db.execute("BEGIN IMMEDIATE"):
+            # Ensure sequence exists
+            await self.db.execute(
                 "INSERT OR IGNORE INTO sequences (name, value) VALUES (?, 0)",
                 (name,)
             )
-            await cursor.execute(
-                "UPDATE sequences SET value = value + 1 WHERE name = ?",
-                (name,)
-            )
-            await cursor.execute(
-                "SELECT value FROM sequences WHERE name = ?",
+            # Atomic increment and return
+            cursor = await self.db.execute(
+                "UPDATE sequences SET value = value + 1 WHERE name = ? RETURNING value",
                 (name,)
             )
             result = await cursor.fetchone()
@@ -103,7 +125,7 @@ class Database:
 
     async def generate_card_id(self, card_type: str) -> str:
         """Generate a unique card ID"""
-        year = datetime.utcnow().year
+        year = datetime.now(timezone.utc).year
         seq = await self._get_next_sequence(f"card_{card_type}")
         return f"MONAD-{year}-{card_type.upper()[:3]}-{seq:04d}"
 

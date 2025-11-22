@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 
 
@@ -45,7 +45,7 @@ class CardMetrics(BaseModel):
 
 
 class CardLogEntry(BaseModel):
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     actor: str = Field(..., description="user/agent ID")
     event: str = Field(..., description="Event description")
     diff: Dict[str, Any] = Field(default_factory=dict, description="State changes")
@@ -84,8 +84,8 @@ class Card(BaseModel):
     log: List[CardLogEntry] = Field(default_factory=list)
     routing: Routing = Field(default_factory=Routing)
     proposed_fix: Optional[ProposedFix] = Field(default=None, description="Proposed code fix")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Config:
         use_enum_values = True
@@ -98,7 +98,7 @@ class Card(BaseModel):
             diff=diff or {}
         )
         self.log.append(entry)
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(timezone.utc)
 
     def update_status(self, new_status: CardStatus, actor: str = "system"):
         """Update card status with logging"""

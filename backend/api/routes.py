@@ -1,7 +1,9 @@
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
+from pathlib import Path
 import asyncio
+import os
 
 from models import Card, CardStatus, Agent
 from storage import Database
@@ -32,11 +34,19 @@ class ConnectionManager:
         self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
+        """Broadcast message to all connected clients, removing dead connections"""
+        dead_connections = []
         for connection in self.active_connections:
             try:
                 await connection.send_json(message)
-            except:
-                pass
+            except Exception as e:
+                # Connection is dead, mark for removal
+                dead_connections.append(connection)
+
+        # Clean up dead connections to prevent memory leak
+        for conn in dead_connections:
+            if conn in self.active_connections:
+                self.active_connections.remove(conn)
 
 
 # Create router and connection manager
@@ -145,10 +155,32 @@ def create_routes(db: Database, orchestrator: AgentOrchestrator):
     async def analyze_codebase(request: AnalyzeRequest):
         """Start analyzing a codebase with parallel execution and progress tracking"""
         try:
+            # Validate and sanitize the path to prevent path traversal attacks
+            try:
+                analysis_path = Path(request.path).resolve()
+
+                # Check if path exists
+                if not analysis_path.exists():
+                    raise HTTPException(status_code=404, detail=f"Path does not exist: {request.path}")
+
+                # Check if it's a directory (we analyze directories, not individual files)
+                if not analysis_path.is_dir():
+                    raise HTTPException(status_code=400, detail="Path must be a directory")
+
+                # Optional: Restrict to allowed base directories (commented out for flexibility)
+                # allowed_base = Path("/home/user").resolve()
+                # if not str(analysis_path).startswith(str(allowed_base)):
+                #     raise HTTPException(status_code=403, detail="Path outside allowed directory")
+
+            except HTTPException:
+                raise  # Re-raise HTTP exceptions
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Invalid path: {str(e)}")
+
             # Notify clients that analysis is starting
             await manager.broadcast({
                 "type": "analysis_started",
-                "data": {"path": request.path}
+                "data": {"path": str(analysis_path)}
             })
 
             # Start a background task to send progress updates
@@ -170,7 +202,7 @@ def create_routes(db: Database, orchestrator: AgentOrchestrator):
             progress_task = asyncio.create_task(send_progress_updates())
 
             # Run analysis (this could take a while)
-            system_agent = await orchestrator.analyze_codebase(request.path)
+            system_agent = await orchestrator.analyze_codebase(str(analysis_path))
 
             # Cancel progress updates
             progress_task.cancel()

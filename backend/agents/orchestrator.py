@@ -87,6 +87,8 @@ class AgentOrchestrator:
             'completed_modules': 0,
             'total_functions': total_functions,
             'completed_functions': 0,
+            'cache_hits': 0,
+            'cache_misses': 0,
             'errors': []
         }
         print(f"Starting parallel analysis: {len(modules)} modules, {total_functions} functions")

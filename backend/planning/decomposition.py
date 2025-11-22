@@ -197,21 +197,40 @@ class SubsystemDecomposer:
     Subsystem: "Implement JWT authentication service"
     → auth_service.py: Create AuthService class
     → token_service.py: Create TokenService for JWT generation
+
+    Phase 3: Includes review-and-revise loop for subsystem design quality
     """
 
-    def __init__(self, llm_provider: LLMProvider, use_intelligent_selection: bool = True):
+    def __init__(
+        self,
+        llm_provider: LLMProvider,
+        use_intelligent_selection: bool = True,
+        use_review_loop: bool = True,
+        review_min_score: float = 75.0,
+        review_max_iterations: int = 2
+    ):
         """
-        Initialize SubsystemDecomposer with Phase 2.5 improvements
+        Initialize SubsystemDecomposer with Phase 2.5 and Phase 3 improvements
 
         Args:
             llm_provider: LLM provider for making API calls
             use_intelligent_selection: Whether to use intelligent agent role selection (default: True)
+            use_review_loop: Whether to use review-and-revise loop (default: True)
+            review_min_score: Minimum quality score for acceptance (default: 75.0)
+            review_max_iterations: Maximum revision iterations (default: 2)
         """
         self.llm_provider = llm_provider
         self.use_intelligent_selection = use_intelligent_selection
+        self.use_review_loop = use_review_loop
+        self.review_min_score = review_min_score
+        self.review_max_iterations = review_max_iterations
 
         # Phase 2.5: Intelligent agent selection
         self.agent_selector = IntelligentAgentSelector(llm_provider) if use_intelligent_selection else None
+
+        # Phase 3: Review loop for quality improvement
+        from planning.review_loop import ReviewLoop
+        self.review_loop = ReviewLoop(llm_provider) if use_review_loop else None
 
     async def decompose(
         self,
@@ -220,7 +239,7 @@ class SubsystemDecomposer:
         context: Dict[str, Any] = None
     ) -> List[Task]:
         """
-        Decompose subsystem task into module tasks using Phase 2.5 improvements
+        Decompose subsystem task into module tasks using Phase 2.5 and Phase 3 improvements
 
         Args:
             task: Subsystem-level task
@@ -232,9 +251,81 @@ class SubsystemDecomposer:
         """
         context = context or {}
 
+        # Generate initial decomposition plan
+        initial_plan = await self._decompose_internal(task, existing_modules, context)
+
+        # Phase 3: Review and revise if enabled
+        if self.review_loop and not context.get("skip_review", False):
+            logger.info("starting_review_loop", subsystem=task.target)
+
+            # Wrapper function for revision calls
+            async def revise_func(
+                task=task,
+                existing_modules=existing_modules,
+                context=None,
+                revision_feedback=None,
+                previous_output=None,
+                is_revision=False,
+                **kwargs
+            ):
+                """Wrapper to call _decompose_internal with revision context"""
+                revision_context = {
+                    **(context or {}),
+                    "is_revision": is_revision,
+                    "revision_feedback": revision_feedback,
+                    "previous_output": previous_output
+                }
+                return await self._decompose_internal(task, existing_modules, revision_context)
+
+            # Review and potentially revise
+            try:
+                final_plan = await self.review_loop.review_and_revise(
+                    initial_output=initial_plan,
+                    primary_agent_func=revise_func,
+                    review_context={
+                        "tier": "subsystem",
+                        "type": "subsystem_decomposition",
+                        "original_request": task.instruction,
+                        "subsystem": task.target
+                    },
+                    min_score=self.review_min_score,
+                    max_iterations=self.review_max_iterations
+                )
+            except Exception as e:
+                logger.error("review_loop_failed", error=str(e))
+                # Use initial plan if review fails
+                final_plan = initial_plan
+        else:
+            # No review loop, use initial plan
+            final_plan = initial_plan
+
+        # Convert final plan to Task objects
+        return self._plan_to_tasks(final_plan, task, context)
+
+    async def _decompose_internal(
+        self,
+        task: Task,
+        existing_modules: List[str],
+        context: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Internal method to generate decomposition plan (called by both initial and revisions)
+
+        Args:
+            task: Subsystem-level task
+            existing_modules: Existing modules in subsystem
+            context: Context including revision feedback if this is a revision
+
+        Returns:
+            Dict with decomposition plan (module_tasks)
+        """
+        context = context or {}
+        is_revision = context.get("is_revision", False)
+        revision_feedback = context.get("revision_feedback", None)
+
         # Phase 2.5 Step 1: Intelligent agent role selection
         agent_role = AgentRole.DESIGN  # Default role
-        if self.agent_selector:
+        if self.agent_selector and not is_revision:
             try:
                 selection = await self.agent_selector.select_agent(
                     user_request=task.instruction,
@@ -262,6 +353,10 @@ class SubsystemDecomposer:
             existing_modules=existing_modules,
             role=agent_role
         )
+
+        # Phase 3: Add revision feedback to prompt if this is a revision
+        if is_revision and revision_feedback:
+            prompts["user"] += f"\n\n---\n**REVISION REQUEST**\n\nYour previous decomposition received the following review feedback. Please revise to address these issues:\n\n{revision_feedback}\n\nProvide an improved decomposition that addresses all the feedback."
 
         # Phase 2.5 Step 3: Call LLM with structured output support
         try:
@@ -311,25 +406,40 @@ class SubsystemDecomposer:
                 ]
             }
 
-        # Create Task objects
+        logger.info(
+            "subsystem_plan_generated",
+            subsystem=task.target,
+            modules=len(plan.get("module_tasks", [])),
+            is_revision=is_revision
+        )
+
+        return plan
+
+    def _plan_to_tasks(
+        self,
+        plan: Dict[str, Any],
+        parent_task: Task,
+        context: Dict[str, Any]
+    ) -> List[Task]:
+        """Convert decomposition plan to Task objects"""
         tasks = []
         for module_def in plan.get("module_tasks", []):
             t = Task(
                 id=f"T-MOD-{uuid.uuid4().hex[:8]}",
-                parent_task_id=task.id,
+                parent_task_id=parent_task.id,
                 type=TaskType(module_def.get("action", "modify_existing")),
                 scope="MODULE",
                 target=module_def.get("module", "unknown.py"),
                 instruction=module_def.get("instruction", ""),
-                context={**task.context, **context},
+                context={**parent_task.context, **context},
                 estimated_complexity=module_def.get("complexity", "medium")
             )
             tasks.append(t)
 
         logger.info(
             "subsystem_decomposition_complete",
-            subsystem=task.target,
-            modules=len(tasks)
+            subsystem=parent_task.target,
+            total_modules=len(tasks)
         )
 
         return tasks

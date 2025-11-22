@@ -645,21 +645,40 @@ class FunctionPlanner:
     Function: "Authenticate user and return JWT token"
     → Generates actual Python code
     → Generates unit tests
+
+    Phase 3: Includes review-and-revise loop for code quality
     """
 
-    def __init__(self, llm_provider: LLMProvider, use_intelligent_selection: bool = True):
+    def __init__(
+        self,
+        llm_provider: LLMProvider,
+        use_intelligent_selection: bool = True,
+        use_review_loop: bool = True,
+        review_min_score: float = 75.0,
+        review_max_iterations: int = 2
+    ):
         """
-        Initialize FunctionPlanner with Phase 2.5 improvements
+        Initialize FunctionPlanner with Phase 2.5 and Phase 3 improvements
 
         Args:
             llm_provider: LLM provider for making API calls
             use_intelligent_selection: Whether to use intelligent agent role selection (default: True)
+            use_review_loop: Whether to use review-and-revise loop (default: True)
+            review_min_score: Minimum quality score for code acceptance (default: 75.0)
+            review_max_iterations: Maximum revision iterations (default: 2)
         """
         self.llm_provider = llm_provider
         self.use_intelligent_selection = use_intelligent_selection
+        self.use_review_loop = use_review_loop
+        self.review_min_score = review_min_score
+        self.review_max_iterations = review_max_iterations
 
         # Phase 2.5: Intelligent agent selection
         self.agent_selector = IntelligentAgentSelector(llm_provider) if use_intelligent_selection else None
+
+        # Phase 3: Review loop for quality improvement
+        from planning.review_loop import ReviewLoop
+        self.review_loop = ReviewLoop(llm_provider) if use_review_loop else None
 
     async def generate_implementation(
         self,
@@ -667,14 +686,79 @@ class FunctionPlanner:
         context: Dict[str, Any] = None
     ) -> Dict[str, Any]:
         """
-        Generate actual code implementation for function using Phase 2.5 improvements
+        Generate actual code implementation for function using Phase 2.5 and Phase 3 improvements
 
         Args:
             task: Function-level task
             context: Additional context (existing code, dependencies, etc.)
 
         Returns:
-            Dict with 'code', 'tests', 'explanation'
+            Dict with 'code', 'tests', 'explanation', and optionally '_review_metadata'
+        """
+        context = context or {}
+
+        # Generate initial implementation
+        initial_output = await self._generate_code_internal(task, context)
+
+        # Phase 3: Review and revise if enabled
+        if self.review_loop and not context.get("skip_review", False):
+            logger.info("starting_review_loop", function=task.target)
+
+            # Wrapper function for revision calls
+            async def revise_func(
+                task=task,
+                context=None,
+                revision_feedback=None,
+                previous_output=None,
+                is_revision=False,
+                **kwargs
+            ):
+                """Wrapper to call _generate_code_internal with revision context"""
+                revision_context = {
+                    **(context or {}),
+                    "is_revision": is_revision,
+                    "revision_feedback": revision_feedback,
+                    "previous_output": previous_output
+                }
+                return await self._generate_code_internal(task, revision_context)
+
+            # Review and potentially revise
+            try:
+                final_output = await self.review_loop.review_and_revise(
+                    initial_output=initial_output,
+                    primary_agent_func=revise_func,
+                    review_context={
+                        "tier": "function",
+                        "type": "code_implementation",
+                        "original_request": task.instruction,
+                        "function_name": task.target.split("::")[-1]
+                    },
+                    min_score=self.review_min_score,
+                    max_iterations=self.review_max_iterations
+                )
+                return final_output
+            except Exception as e:
+                logger.error("review_loop_failed", error=str(e))
+                # Return initial output if review fails
+                return initial_output
+        else:
+            # No review loop, return initial output
+            return initial_output
+
+    async def _generate_code_internal(
+        self,
+        task: Task,
+        context: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Internal method to generate code (called by both initial generation and revisions)
+
+        Args:
+            task: Function-level task
+            context: Context including revision feedback if this is a revision
+
+        Returns:
+            Dict with 'code', 'explanation'
         """
         context = context or {}
 
@@ -682,10 +766,13 @@ class FunctionPlanner:
         module_path = task.target.split("::")[0]
         function_name = task.target.split("::")[-1]
 
+        is_revision = context.get("is_revision", False)
+        revision_feedback = context.get("revision_feedback", None)
+
         # Phase 2.5 Step 1: Intelligent agent role selection
         # For code generation, default to IMPLEMENTATION role
         agent_role = AgentRole.IMPLEMENTATION
-        if self.agent_selector:
+        if self.agent_selector and not is_revision:
             try:
                 selection = await self.agent_selector.select_agent(
                     user_request=task.instruction,
@@ -720,6 +807,10 @@ class FunctionPlanner:
             module_context=module_context,
             role=agent_role
         )
+
+        # Phase 3: Add revision feedback to prompt if this is a revision
+        if is_revision and revision_feedback:
+            prompts["user"] += f"\n\n---\n**REVISION REQUEST**\n\nYour previous implementation received the following review feedback. Please revise the code to address these issues:\n\n{revision_feedback}\n\nProvide an improved implementation that addresses all the feedback."
 
         # Phase 2.5 Step 3: Call LLM with structured output support
         try:
@@ -769,9 +860,10 @@ class FunctionPlanner:
             }
 
         logger.info(
-            "function_implementation_complete",
+            "function_code_generated",
             function=function_name,
-            code_length=len(result.get("code", ""))
+            code_length=len(result.get("code", "")),
+            is_revision=is_revision
         )
 
         return result

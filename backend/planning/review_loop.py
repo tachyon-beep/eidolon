@@ -254,8 +254,13 @@ Provide a thorough review in JSON format:
                 raise ValueError("Failed to parse review response as JSON")
 
             # Create ReviewResult
+            # Convert decision to lowercase for case-insensitive enum lookup
+            decision_str = review_data.get("decision", "revise_major")
+            if isinstance(decision_str, str):
+                decision_str = decision_str.lower()
+
             return ReviewResult(
-                decision=ReviewDecision(review_data.get("decision", "revise_major")),
+                decision=ReviewDecision(decision_str),
                 score=float(review_data.get("score", 50.0)),
                 strengths=review_data.get("strengths", []),
                 issues=review_data.get("issues", []),

@@ -37,18 +37,22 @@ async def main():
     print(f"   Model: {mock_provider.get_model_name()}")
     print()
 
+    # Test feature request
+    user_request = "Add user authentication with JWT tokens"
+    project_path = "/tmp/sample_project"
+
     # Create implementation orchestrator
     print("🎭 Creating implementation orchestrator...")
     impl_orchestrator = ImplementationOrchestrator(
         db=db,
         llm_provider=mock_provider,
-        max_concurrent_tasks=5
+        project_path=project_path,
+        max_concurrent_tasks=5,
+        enable_testing=False,  # Disable testing for now (no pytest installed)
+        enable_rollback=True,
+        require_approval=False
     )
     print()
-
-    # Test feature request
-    user_request = "Add user authentication with JWT tokens"
-    project_path = "/tmp/sample_project"
 
     print("🚀 Starting implementation...")
     print()
@@ -56,7 +60,6 @@ async def main():
     try:
         result = await impl_orchestrator.implement_feature(
             user_request=user_request,
-            project_path=project_path,
             constraints={
                 "test_coverage_min": 80,
                 "max_complexity": 10,

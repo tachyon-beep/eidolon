@@ -2,7 +2,7 @@
 Implementation Orchestrator for Top-Down Task Decomposition
 
 Coordinates the top-down decomposition of feature requests into concrete
-implementation tasks, then executes them bottom-up.
+implementation tasks, then executes them bottom-up with file I/O, testing, and rollback.
 """
 
 import asyncio
@@ -21,6 +21,8 @@ from planning import (
     ClassDecomposer,
     FunctionPlanner
 )
+from code_writer import CodeWriter
+from test_generator import TestGenerator, TestRunner
 from llm_providers import LLMProvider
 from storage import Database
 from logging_config import get_logger
@@ -48,11 +50,19 @@ class ImplementationOrchestrator:
         self,
         db: Database,
         llm_provider: LLMProvider,
-        max_concurrent_tasks: int = 5
+        project_path: str,
+        max_concurrent_tasks: int = 5,
+        enable_testing: bool = True,
+        enable_rollback: bool = True,
+        require_approval: bool = False
     ):
         self.db = db
         self.llm_provider = llm_provider
+        self.project_path = project_path
         self.max_concurrent_tasks = max_concurrent_tasks
+        self.enable_testing = enable_testing
+        self.enable_rollback = enable_rollback
+        self.require_approval = require_approval
 
         # Initialize decomposers
         self.system_decomposer = SystemDecomposer(llm_provider)
@@ -61,17 +71,25 @@ class ImplementationOrchestrator:
         self.class_decomposer = ClassDecomposer(llm_provider)
         self.function_planner = FunctionPlanner(llm_provider)
 
+        # Initialize Phase 2 components
+        self.code_writer = CodeWriter(project_path)
+        self.test_generator = TestGenerator(llm_provider)
+        self.test_runner = TestRunner(project_path)
+
         # Task graph
         self.task_graph = TaskGraph()
 
         # Semaphore for concurrency control
         self.task_semaphore = asyncio.Semaphore(max_concurrent_tasks)
 
+        # Track test results
+        self.test_results = {}
+
     async def implement_feature(
         self,
         user_request: str,
-        project_path: str,
-        constraints: Optional[Dict[str, Any]] = None
+        constraints: Optional[Dict[str, Any]] = None,
+        dry_run: bool = False
     ) -> Dict[str, Any]:
         """
         Main entry point: Implement a feature from user request
@@ -108,7 +126,7 @@ class ImplementationOrchestrator:
         print(f"Project: {project_path}\n")
 
         # Step 1: Analyze project structure
-        project_structure = await self._analyze_project_structure(project_path)
+        project_structure = await self._analyze_project_structure(self.project_path)
         subsystems = project_structure.get("subsystems", [])
 
         print(f"📁 Detected subsystems: {', '.join(subsystems)}\n")
@@ -119,7 +137,7 @@ class ImplementationOrchestrator:
             id="T-ROOT",
             type=TaskType.CREATE_NEW,
             scope="SYSTEM",
-            target=project_path,
+            target=self.project_path,
             instruction=user_request,
             context=constraints
         )
@@ -127,7 +145,7 @@ class ImplementationOrchestrator:
 
         subsystem_tasks = await self.system_decomposer.decompose(
             user_request,
-            project_path,
+            self.project_path,
             subsystems,
             context=constraints
         )
@@ -147,7 +165,7 @@ class ImplementationOrchestrator:
             print(f"   Processing subsystem: {subsystem_task.target}")
 
             # Get existing modules in subsystem
-            subsystem_path = Path(project_path) / subsystem_task.target
+            subsystem_path = Path(self.project_path) / subsystem_task.target
             existing_modules = list(subsystem_path.glob("*.py")) if subsystem_path.exists() else []
             existing_module_names = [m.name for m in existing_modules]
 
@@ -301,18 +319,103 @@ class ImplementationOrchestrator:
             await asyncio.gather(*execution_tasks, return_exceptions=True)
 
     async def _execute_task(self, task: Task):
-        """Execute a single task"""
+        """Execute a single task with file I/O, testing, and rollback"""
         async with self.task_semaphore:
             task.update_status(TaskStatus.IN_PROGRESS)
 
             try:
                 if task.scope == "FUNCTION":
-                    # Generate actual code
+                    # PHASE 2A: Generate code
                     result = await self.function_planner.generate_implementation(task)
-                    task.set_result(result)
-                    print(f"   ✅ {task.target}: Code generated")
+                    code = result.get("code", "")
+
+                    # PHASE 2B: Write code to file
+                    module_path = task.target.split("::")[0]
+                    function_name = task.target.split("::")[-1]
+
+                    write_result = self.code_writer.write_function(
+                        module_path=module_path,
+                        function_code=code
+                    )
+
+                    print(f"   📝 {task.target}: Code written to {module_path}")
+
+                    # PHASE 2C: Generate tests
+                    if self.enable_testing:
+                        test_result = await self.test_generator.generate_function_tests(
+                            function_code=code,
+                            function_name=function_name,
+                            module_path=module_path,
+                            context=task.context
+                        )
+
+                        # Write test file
+                        test_module = Path(module_path).stem
+                        test_file = f"tests/test_{test_module}.py"
+                        test_code = test_result.get("test_code", "")
+
+                        self.code_writer.write_file(test_file, test_code)
+                        print(f"   🧪 {task.target}: {test_result.get('test_count', 0)} tests generated")
+
+                        # PHASE 2D: Run tests
+                        run_result = self.test_runner.run_tests(test_file)
+                        self.test_results[task.id] = run_result
+
+                        if not run_result.get("success", False):
+                            # Tests failed!
+                            print(f"   ❌ {task.target}: Tests failed ({run_result.get('failed', 0)} failures)")
+
+                            if self.enable_rollback:
+                                # Rollback this change
+                                print(f"   ↩️  {task.target}: Rolling back changes")
+                                raise Exception(f"Tests failed: {run_result.get('failed', 0)} failures")
+
+                        else:
+                            print(f"   ✅ {task.target}: Tests passed ({run_result.get('passed', 0)} tests)")
+
+                    task.set_result({
+                        "code": code,
+                        "file": write_result,
+                        "tests": test_result if self.enable_testing else None,
+                        "test_run": run_result if self.enable_testing else None
+                    })
+
+                elif task.scope == "CLASS":
+                    # Generate and write class code
+                    class_name = task.target.split("::")[-1]
+                    module_path = task.target.split("::")[0]
+
+                    # Collect all method code from child tasks
+                    methods_code = []
+                    for subtask_id in task.subtask_ids:
+                        subtask = self.task_graph.get_task(subtask_id)
+                        if subtask and subtask.result and "code" in subtask.result:
+                            methods_code.append(subtask.result["code"])
+
+                    # Build class code
+                    class_code = f"class {class_name}:\n"
+                    class_code += f'    """{task.instruction}"""\n\n'
+                    for method_code in methods_code:
+                        # Indent method code
+                        indented = "\n".join("    " + line for line in method_code.split("\n"))
+                        class_code += indented + "\n\n"
+
+                    write_result = self.code_writer.write_class(
+                        module_path=module_path,
+                        class_name=class_name,
+                        class_code=class_code
+                    )
+
+                    print(f"   📝 {task.target}: Class written with {len(methods_code)} methods")
+
+                    task.set_result({
+                        "code": class_code,
+                        "file": write_result,
+                        "methods": len(methods_code)
+                    })
+
                 else:
-                    # Higher-level tasks just wait for children
+                    # Higher-level tasks (MODULE, SUBSYSTEM, SYSTEM) just coordinate children
                     task.set_result({"children_completed": len(task.subtask_ids)})
                     print(f"   ✅ {task.target}: Children integrated")
 
@@ -320,3 +423,8 @@ class ImplementationOrchestrator:
                 task.set_error(str(e))
                 print(f"   ❌ {task.target}: Failed - {str(e)}")
                 logger.error("task_execution_failed", task_id=task.id, error=str(e))
+
+                # Trigger rollback if enabled
+                if self.enable_rollback and task.scope in ["FUNCTION", "CLASS"]:
+                    rollback_result = self.code_writer.rollback()
+                    logger.info("rollback_triggered", changes_reverted=rollback_result["rollback_count"])

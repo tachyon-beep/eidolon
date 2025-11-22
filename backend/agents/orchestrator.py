@@ -1,5 +1,6 @@
 import asyncio
 import os
+import uuid
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import time
@@ -10,6 +11,7 @@ from models import Agent, AgentScope, AgentStatus, Card, CardType, CardStatus, P
 from analysis import CodeAnalyzer, ModuleInfo
 from storage import Database
 from cache import CacheManager
+from git_integration import GitManager, GitChanges
 
 
 class AgentOrchestrator:
@@ -124,6 +126,218 @@ class AgentOrchestrator:
         await self.db.update_agent(system_agent)
 
         return system_agent
+
+    async def analyze_incremental(
+        self,
+        path: str,
+        base: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Perform incremental analysis - only analyze files that have changed since last analysis.
+
+        Args:
+            path: Path to the codebase
+            base: Git reference to compare against (branch/commit). Defaults to last analysis or HEAD.
+
+        Returns:
+            Dict with analysis results and statistics
+        """
+        session_id = str(uuid.uuid4())
+        path_obj = Path(path)
+
+        # Initialize git manager
+        git_manager = GitManager(path)
+
+        # Check if it's a git repository
+        if not git_manager.is_git_repo():
+            return {
+                'error': 'Not a git repository. Incremental analysis requires git.',
+                'suggestion': 'Run full analysis instead, or initialize git repository.'
+            }
+
+        # Get git metadata
+        current_commit = git_manager.get_current_commit()
+        current_branch = git_manager.get_current_branch()
+
+        # Get last analysis session to determine what changed
+        last_session = await self.db.get_last_analysis_session(str(path_obj.absolute()))
+
+        # Determine base reference for comparison
+        if base is None:
+            # Use last analysis commit or HEAD
+            base = last_session['git_commit'] if last_session else 'HEAD'
+
+        print(f"\n🔄 Incremental Analysis")
+        print(f"Repository: {path}")
+        print(f"Current commit: {current_commit}")
+        print(f"Comparing against: {base}")
+
+        # Get changed Python files
+        try:
+            git_changes = git_manager.get_changed_python_files(base=base)
+        except Exception as e:
+            return {
+                'error': f'Failed to detect git changes: {str(e)}',
+                'suggestion': 'Check git status and try again.'
+            }
+
+        print(f"\n📊 Changes Detected:")
+        print(f"  Modified: {len(git_changes.modified)} files")
+        print(f"  Added: {len(git_changes.added)} files")
+        print(f"  Deleted: {len(git_changes.deleted)} files")
+        print(f"  Total to analyze: {len(git_changes.all_changed)} files")
+
+        # If no changes, return early
+        if not git_changes.all_changed and not git_changes.deleted:
+            return {
+                'status': 'no_changes',
+                'message': 'No Python files have changed since last analysis',
+                'stats': {
+                    'files_analyzed': 0,
+                    'files_skipped': 0,
+                    'cache_hits': 0,
+                    'cache_misses': 0
+                }
+            }
+
+        # Create analysis session
+        await self.db.create_analysis_session(
+            session_id=session_id,
+            path=str(path_obj.absolute()),
+            mode='incremental',
+            git_commit=current_commit,
+            git_branch=current_branch
+        )
+
+        # Analyze directory to get all modules
+        self.analyzer.base_path = path_obj
+        all_modules = self.analyzer.analyze_directory()
+
+        # Filter to only changed files
+        changed_file_set = set(git_changes.all_changed)
+        modules_to_analyze = [
+            m for m in all_modules
+            if any(Path(m.file_path).samefile(path_obj / changed_file)
+                   for changed_file in changed_file_set
+                   if (path_obj / changed_file).exists())
+        ]
+
+        print(f"\n🎯 Analysis Plan:")
+        print(f"  Total modules in codebase: {len(all_modules)}")
+        print(f"  Modules to analyze: {len(modules_to_analyze)}")
+        print(f"  Modules skipped (unchanged): {len(all_modules) - len(modules_to_analyze)}")
+
+        # Invalidate cache for deleted files
+        for deleted_file in git_changes.deleted:
+            if self.cache:
+                await self.cache.invalidate_file(str(path_obj / deleted_file))
+                print(f"  ❌ Invalidated cache for deleted file: {deleted_file}")
+
+        # Build call graph for cross-file dependency analysis
+        print("\n🔗 Building call graph...")
+        self.call_graph = self.analyzer.build_call_graph(all_modules)  # Use all modules for complete graph
+
+        # Create system-level agent for this incremental analysis
+        system_agent = Agent(
+            id="",
+            scope=AgentScope.SYSTEM,
+            target=path,
+            status=AgentStatus.ANALYZING,
+            session_id=session_id
+        )
+        system_agent = await self.db.create_agent(system_agent)
+
+        # Initialize progress tracking
+        total_functions = sum(
+            len(m.functions) + sum(len(c.methods) for c in m.classes)
+            for m in modules_to_analyze
+        )
+        self.progress = {
+            'total_modules': len(modules_to_analyze),
+            'completed_modules': 0,
+            'total_functions': total_functions,
+            'completed_functions': 0,
+            'cache_hits': 0,
+            'cache_misses': 0,
+            'errors': []
+        }
+
+        print(f"\n🚀 Starting incremental analysis:")
+        print(f"  Modules: {len(modules_to_analyze)}")
+        print(f"  Functions: {total_functions}")
+        print(f"  Concurrency: {self.max_concurrent_modules} modules, {self.max_concurrent_functions} functions")
+
+        # Deploy module-level agents IN PARALLEL (only for changed files)
+        module_tasks = [
+            self._deploy_module_agent(system_agent.id, module_info)
+            for module_info in modules_to_analyze
+        ]
+
+        module_agents = await asyncio.gather(*module_tasks, return_exceptions=True)
+
+        # Process results
+        for i, result in enumerate(module_agents):
+            if isinstance(result, Exception):
+                error_msg = f"Module {modules_to_analyze[i].file_path} failed: {str(result)}"
+                print(f"ERROR: {error_msg}")
+                self.progress['errors'].append(error_msg)
+            else:
+                system_agent.children_ids.append(result.id)
+
+        print(f"\n✅ Incremental analysis complete!")
+        print(f"  Modules analyzed: {self.progress['completed_modules']}/{len(modules_to_analyze)}")
+        print(f"  Functions analyzed: {self.progress['completed_functions']}/{total_functions}")
+        print(f"  Cache hits: {self.progress['cache_hits']}")
+        print(f"  Cache misses: {self.progress['cache_misses']}")
+        print(f"  Errors: {len(self.progress['errors'])}")
+
+        # Run system-level analysis (only on changed modules)
+        if modules_to_analyze:
+            await self._run_system_analysis(system_agent, modules_to_analyze)
+
+        # Update system agent
+        system_agent.update_status(AgentStatus.COMPLETED)
+        await self.db.update_agent(system_agent)
+
+        # Update analysis session with results
+        files_analyzed = [m.file_path for m in modules_to_analyze]
+        files_skipped = [m.file_path for m in all_modules if m not in modules_to_analyze]
+
+        await self.db.update_analysis_session(
+            session_id=session_id,
+            files_analyzed=files_analyzed,
+            files_skipped=files_skipped,
+            total_modules=len(modules_to_analyze),
+            total_functions=total_functions,
+            cache_hits=self.progress['cache_hits'],
+            cache_misses=self.progress['cache_misses']
+        )
+
+        return {
+            'status': 'completed',
+            'session_id': session_id,
+            'agent_id': system_agent.id,
+            'git_info': {
+                'commit': current_commit,
+                'branch': current_branch,
+                'base_reference': base
+            },
+            'changes': {
+                'modified': len(git_changes.modified),
+                'added': len(git_changes.added),
+                'deleted': len(git_changes.deleted)
+            },
+            'stats': {
+                'files_analyzed': len(files_analyzed),
+                'files_skipped': len(files_skipped),
+                'modules_analyzed': len(modules_to_analyze),
+                'functions_analyzed': total_functions,
+                'cache_hits': self.progress['cache_hits'],
+                'cache_misses': self.progress['cache_misses'],
+                'errors': len(self.progress['errors'])
+            },
+            'hierarchy': await self.get_agent_hierarchy(system_agent.id)
+        }
 
     async def _deploy_module_agent(self, parent_id: str, module_info: ModuleInfo) -> Agent:
         """Deploy an agent for a module (file) with parallel function analysis"""

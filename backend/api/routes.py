@@ -15,6 +15,11 @@ class AnalyzeRequest(BaseModel):
     path: str
 
 
+class IncrementalAnalyzeRequest(BaseModel):
+    path: str
+    base: Optional[str] = None  # Git reference to compare against (branch/commit)
+
+
 class UpdateCardRequest(BaseModel):
     status: Optional[CardStatus] = None
     routing: Optional[Dict[str, str]] = None
@@ -235,6 +240,109 @@ def create_routes(db: Database, orchestrator: AgentOrchestrator):
                 "hierarchy": await orchestrator.get_agent_hierarchy(system_agent.id)
             }
 
+        except Exception as e:
+            await manager.broadcast({
+                "type": "analysis_error",
+                "data": {"error": str(e)}
+            })
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.post("/analyze/incremental")
+    async def analyze_incremental(request: IncrementalAnalyzeRequest):
+        """Start incremental analysis - only analyze files that changed since last analysis or base commit"""
+        try:
+            # Validate and sanitize the path to prevent path traversal attacks
+            try:
+                analysis_path = Path(request.path).resolve()
+
+                # Check if path exists
+                if not analysis_path.exists():
+                    raise HTTPException(status_code=404, detail=f"Path does not exist: {request.path}")
+
+                # Check if it's a directory
+                if not analysis_path.is_dir():
+                    raise HTTPException(status_code=400, detail="Path must be a directory")
+
+            except HTTPException:
+                raise  # Re-raise HTTP exceptions
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Invalid path: {str(e)}")
+
+            # Notify clients that incremental analysis is starting
+            await manager.broadcast({
+                "type": "analysis_started",
+                "data": {
+                    "path": str(analysis_path),
+                    "mode": "incremental",
+                    "base": request.base
+                }
+            })
+
+            # Start a background task to send progress updates
+            async def send_progress_updates():
+                while True:
+                    await asyncio.sleep(2)  # Send updates every 2 seconds
+                    progress = orchestrator.get_progress()
+
+                    # Stop if analysis is complete
+                    if progress['completed_modules'] >= progress['total_modules']:
+                        break
+
+                    await manager.broadcast({
+                        "type": "analysis_progress",
+                        "data": progress
+                    })
+
+            # Start progress updates task (don't await it)
+            progress_task = asyncio.create_task(send_progress_updates())
+
+            # Run incremental analysis
+            result = await orchestrator.analyze_incremental(str(analysis_path), base=request.base)
+
+            # Cancel progress updates
+            progress_task.cancel()
+            try:
+                await progress_task
+            except asyncio.CancelledError:
+                pass
+
+            # Check if there was an error (e.g., not a git repo)
+            if 'error' in result:
+                await manager.broadcast({
+                    "type": "analysis_error",
+                    "data": {
+                        "error": result['error'],
+                        "suggestion": result.get('suggestion', '')
+                    }
+                })
+                raise HTTPException(status_code=400, detail=result['error'])
+
+            # Get all cards created during analysis
+            cards = await db.get_all_cards()
+
+            # Notify clients that incremental analysis is complete
+            await manager.broadcast({
+                "type": "analysis_completed",
+                "data": {
+                    "mode": "incremental",
+                    "session_id": result['session_id'],
+                    "stats": result['stats'],
+                    "cards_count": len(cards)
+                }
+            })
+
+            return {
+                "status": "completed",
+                "mode": "incremental",
+                "session_id": result['session_id'],
+                "stats": result['stats'],
+                "cards_created": len(cards),
+                "git_info": result.get('git_info', {}),
+                "hierarchy": result.get('hierarchy')
+            }
+
+        except HTTPException:
+            raise  # Re-raise HTTP exceptions
         except Exception as e:
             await manager.broadcast({
                 "type": "analysis_error",

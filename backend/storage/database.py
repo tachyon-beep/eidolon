@@ -80,6 +80,25 @@ class Database:
                 )
             """)
 
+            # Analysis sessions for incremental analysis tracking
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS analysis_sessions (
+                    id TEXT PRIMARY KEY,
+                    path TEXT NOT NULL,
+                    mode TEXT NOT NULL,
+                    git_commit TEXT,
+                    git_branch TEXT,
+                    files_analyzed TEXT,
+                    files_skipped TEXT,
+                    total_modules INTEGER DEFAULT 0,
+                    total_functions INTEGER DEFAULT 0,
+                    cache_hits INTEGER DEFAULT 0,
+                    cache_misses INTEGER DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    completed_at TEXT
+                )
+            """)
+
             # Create indices for faster queries
             await cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_cards_status ON cards(status)
@@ -373,3 +392,94 @@ class Database:
             total_tokens=row["total_tokens"],
             total_cost=row["total_cost"]
         )
+
+    # Analysis session operations
+    async def create_analysis_session(
+        self,
+        session_id: str,
+        path: str,
+        mode: str,
+        git_commit: Optional[str] = None,
+        git_branch: Optional[str] = None
+    ) -> str:
+        """Create a new analysis session"""
+        async with self.db.cursor() as cursor:
+            await cursor.execute("""
+                INSERT INTO analysis_sessions
+                (id, path, mode, git_commit, git_branch, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                session_id,
+                path,
+                mode,
+                git_commit,
+                git_branch,
+                datetime.now(timezone.utc).isoformat()
+            ))
+            await self.db.commit()
+
+        return session_id
+
+    async def update_analysis_session(
+        self,
+        session_id: str,
+        files_analyzed: List[str],
+        files_skipped: List[str],
+        total_modules: int,
+        total_functions: int,
+        cache_hits: int,
+        cache_misses: int
+    ):
+        """Update an analysis session with completion data"""
+        async with self.db.cursor() as cursor:
+            await cursor.execute("""
+                UPDATE analysis_sessions SET
+                    files_analyzed = ?,
+                    files_skipped = ?,
+                    total_modules = ?,
+                    total_functions = ?,
+                    cache_hits = ?,
+                    cache_misses = ?,
+                    completed_at = ?
+                WHERE id = ?
+            """, (
+                json.dumps(files_analyzed),
+                json.dumps(files_skipped),
+                total_modules,
+                total_functions,
+                cache_hits,
+                cache_misses,
+                datetime.now(timezone.utc).isoformat(),
+                session_id
+            ))
+            await self.db.commit()
+
+    async def get_last_analysis_session(self, path: str) -> Optional[Dict[str, Any]]:
+        """Get the most recent analysis session for a given path"""
+        async with self.db.cursor() as cursor:
+            await cursor.execute("""
+                SELECT * FROM analysis_sessions
+                WHERE path = ? AND completed_at IS NOT NULL
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (path,))
+            row = await cursor.fetchone()
+
+        if not row:
+            return None
+
+        return {
+            'id': row['id'],
+            'path': row['path'],
+            'mode': row['mode'],
+            'git_commit': row['git_commit'],
+            'git_branch': row['git_branch'],
+            'files_analyzed': json.loads(row['files_analyzed']) if row['files_analyzed'] else [],
+            'files_skipped': json.loads(row['files_skipped']) if row['files_skipped'] else [],
+            'total_modules': row['total_modules'],
+            'total_functions': row['total_functions'],
+            'cache_hits': row['cache_hits'],
+            'cache_misses': row['cache_misses'],
+            'created_at': row['created_at'],
+            'completed_at': row['completed_at']
+        }

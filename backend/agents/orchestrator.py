@@ -6,7 +6,7 @@ from pathlib import Path
 import time
 
 from models import Agent, AgentScope, AgentStatus, Card, CardType, CardStatus, ProposedFix
-from analysis import CodeAnalyzer, ModuleInfo
+from analysis import CodeAnalyzer, ModuleInfo, SubsystemInfo
 from storage import Database
 from cache import CacheManager
 from git_integration import GitManager, GitChanges
@@ -123,7 +123,8 @@ class AgentOrchestrator:
 
     async def analyze_codebase(self, path: str) -> Agent:
         """
-        Start hierarchical analysis of a codebase.
+        Start hierarchical analysis of a codebase with 5-tier hierarchy.
+        SYSTEM → SUBSYSTEM (optional) → MODULE → CLASS (optional) → FUNCTION
         Returns the system-level agent.
         """
         # Create system-level agent
@@ -148,50 +149,81 @@ class AgentOrchestrator:
             orphaned=len(self.call_graph['orphaned'])
         )
 
+        # Group modules into subsystems based on directory structure
+        subsystems = self.analyzer.group_modules_into_subsystems(modules)
+
         # Initialize progress tracking
         total_functions = sum(
             len(m.functions) + sum(len(c.methods) for c in m.classes)
             for m in modules
         )
+        total_classes = sum(len(m.classes) for m in modules)
+
         self.progress = {
             'total_modules': len(modules),
             'completed_modules': 0,
+            'total_classes': total_classes,
+            'completed_classes': 0,
             'total_functions': total_functions,
             'completed_functions': 0,
+            'total_subsystems': len(subsystems),
+            'completed_subsystems': 0,
             'cache_hits': 0,
             'cache_misses': 0,
             'errors': []
         }
         logger.info(
-            "starting_parallel_analysis",
+            "starting_5tier_analysis",
+            subsystems=len(subsystems),
             modules=len(modules),
+            classes=total_classes,
             functions=total_functions,
             max_concurrent_modules=self.max_concurrent_modules,
             max_concurrent_functions=self.max_concurrent_functions
         )
 
-        # Deploy module-level agents IN PARALLEL
-        module_tasks = [
-            self._deploy_module_agent(system_agent.id, module_info)
-            for module_info in modules
-        ]
+        # Deploy agents based on whether we have subsystems
+        if subsystems:
+            # Deploy subsystem-level agents IN PARALLEL
+            subsystem_tasks = [
+                self._deploy_subsystem_agent(system_agent.id, subsystem_info)
+                for subsystem_info in subsystems
+            ]
+            subsystem_agents = await asyncio.gather(*subsystem_tasks, return_exceptions=True)
 
-        # Run all module agents concurrently and collect results
-        module_agents = await asyncio.gather(*module_tasks, return_exceptions=True)
+            # Process results and track errors
+            for i, result in enumerate(subsystem_agents):
+                if isinstance(result, Exception):
+                    error_msg = f"Subsystem {subsystems[i].name} failed: {str(result)}"
+                    print(f"ERROR: {error_msg}")
+                    self.progress['errors'].append(error_msg)
+                else:
+                    system_agent.children_ids.append(result.id)
+        else:
+            # No subsystems - deploy modules directly under system
+            module_tasks = [
+                self._deploy_module_agent(system_agent.id, module_info)
+                for module_info in modules
+            ]
+            module_agents = await asyncio.gather(*module_tasks, return_exceptions=True)
 
-        # Process results and track errors
-        for i, result in enumerate(module_agents):
-            if isinstance(result, Exception):
-                error_msg = f"Module {modules[i].file_path} failed: {str(result)}"
-                print(f"ERROR: {error_msg}")
-                self.progress['errors'].append(error_msg)
-            else:
-                system_agent.children_ids.append(result.id)
+            # Process results and track errors
+            for i, result in enumerate(module_agents):
+                if isinstance(result, Exception):
+                    error_msg = f"Module {modules[i].file_path} failed: {str(result)}"
+                    print(f"ERROR: {error_msg}")
+                    self.progress['errors'].append(error_msg)
+                else:
+                    system_agent.children_ids.append(result.id)
 
         logger.info(
             "analysis_complete",
+            completed_subsystems=self.progress['completed_subsystems'],
+            total_subsystems=len(subsystems),
             completed_modules=self.progress['completed_modules'],
             total_modules=len(modules),
+            completed_classes=self.progress['completed_classes'],
+            total_classes=total_classes,
             completed_functions=self.progress['completed_functions'],
             total_functions=total_functions,
             errors=len(self.progress['errors'])
@@ -331,18 +363,25 @@ class AgentOrchestrator:
             len(m.functions) + sum(len(c.methods) for c in m.classes)
             for m in modules_to_analyze
         )
+        total_classes = sum(len(m.classes) for m in modules_to_analyze)
+
         self.progress = {
             'total_modules': len(modules_to_analyze),
             'completed_modules': 0,
+            'total_classes': total_classes,
+            'completed_classes': 0,
             'total_functions': total_functions,
             'completed_functions': 0,
+            'total_subsystems': 0,  # Incremental doesn't use subsystems
+            'completed_subsystems': 0,
             'cache_hits': 0,
             'cache_misses': 0,
             'errors': []
         }
 
-        print(f"\n🚀 Starting incremental analysis:")
+        print(f"\n🚀 Starting incremental analysis (5-tier hierarchy):")
         print(f"  Modules: {len(modules_to_analyze)}")
+        print(f"  Classes: {total_classes}")
         print(f"  Functions: {total_functions}")
         print(f"  Concurrency: {self.max_concurrent_modules} modules, {self.max_concurrent_functions} functions")
 
@@ -365,6 +404,7 @@ class AgentOrchestrator:
 
         print(f"\n✅ Incremental analysis complete!")
         print(f"  Modules analyzed: {self.progress['completed_modules']}/{len(modules_to_analyze)}")
+        print(f"  Classes analyzed: {self.progress['completed_classes']}/{total_classes}")
         print(f"  Functions analyzed: {self.progress['completed_functions']}/{total_functions}")
         print(f"  Cache hits: {self.progress['cache_hits']}")
         print(f"  Cache misses: {self.progress['cache_misses']}")
@@ -418,6 +458,60 @@ class AgentOrchestrator:
             'hierarchy': await self.get_agent_hierarchy(system_agent.id)
         }
 
+    async def _deploy_subsystem_agent(self, parent_id: str, subsystem_info: SubsystemInfo) -> Agent:
+        """
+        Deploy an agent for a subsystem (directory/package).
+        Coordinates analysis of all modules and nested subsystems within.
+        """
+        subsystem_agent = Agent(
+            id="",
+            scope=AgentScope.SUBSYSTEM,
+            target=subsystem_info.directory,
+            status=AgentStatus.ANALYZING,
+            parent_id=parent_id
+        )
+        subsystem_agent = await self.db.create_agent(subsystem_agent)
+
+        # Deploy child subsystem agents IN PARALLEL (for nested directories)
+        child_tasks = []
+        for child_subsystem in subsystem_info.subsystems:
+            task = self._deploy_subsystem_agent(subsystem_agent.id, child_subsystem)
+            child_tasks.append(task)
+
+        # Deploy module agents IN PARALLEL
+        for module in subsystem_info.modules:
+            task = self._deploy_module_agent(subsystem_agent.id, module)
+            child_tasks.append(task)
+
+        # Execute all child agents concurrently
+        child_agents = await asyncio.gather(*child_tasks, return_exceptions=True)
+
+        # Process results
+        for i, result in enumerate(child_agents):
+            if isinstance(result, Exception):
+                error_msg = f"Child agent failed in subsystem {subsystem_info.name}: {str(result)}"
+                print(f"  ERROR: {error_msg}")
+                self.progress['errors'].append(error_msg)
+            else:
+                subsystem_agent.children_ids.append(result.id)
+
+        # Run subsystem-level analysis
+        await self._run_subsystem_analysis(subsystem_agent, subsystem_info)
+
+        subsystem_agent.update_status(AgentStatus.COMPLETED)
+        await self.db.update_agent(subsystem_agent)
+
+        # Update progress
+        self.progress['completed_subsystems'] += 1
+        logger.info(
+            "subsystem_complete",
+            name=subsystem_info.name,
+            modules=len(subsystem_info.modules),
+            nested_subsystems=len(subsystem_info.subsystems)
+        )
+
+        return subsystem_agent
+
     async def _deploy_module_agent(self, parent_id: str, module_info: ModuleInfo) -> Agent:
         """Deploy an agent for a module (file) with parallel function analysis"""
         # Use semaphore for rate limiting at module level
@@ -431,9 +525,19 @@ class AgentOrchestrator:
             )
             module_agent = await self.db.create_agent(module_agent)
 
-            # Collect all function/method tasks
-            function_tasks = []
+            # Collect tasks for classes and standalone functions
+            child_tasks = []
 
+            # Deploy CLASS agents for each class (which will deploy function agents for methods)
+            for cls in module_info.classes:
+                task = self._deploy_class_agent(
+                    module_agent.id,
+                    module_info,
+                    cls
+                )
+                child_tasks.append(task)
+
+            # Deploy FUNCTION agents for standalone functions (not in classes)
             for func in module_info.functions:
                 task = self._deploy_function_agent(
                     module_agent.id,
@@ -441,26 +545,16 @@ class AgentOrchestrator:
                     func.name,
                     func
                 )
-                function_tasks.append(task)
+                child_tasks.append(task)
 
-            for cls in module_info.classes:
-                for method in cls.methods:
-                    task = self._deploy_function_agent(
-                        module_agent.id,
-                        module_info,
-                        f"{cls.name}.{method.name}",
-                        method
-                    )
-                    function_tasks.append(task)
-
-            # Run ALL function agents IN PARALLEL
-            function_agents = await asyncio.gather(*function_tasks, return_exceptions=True)
+            # Run ALL child agents (classes and functions) IN PARALLEL
+            child_agents = await asyncio.gather(*child_tasks, return_exceptions=True)
 
             # Process results and track errors
             valid_agents = []
-            for i, result in enumerate(function_agents):
+            for i, result in enumerate(child_agents):
                 if isinstance(result, Exception):
-                    error_msg = f"Function analysis failed: {str(result)}"
+                    error_msg = f"Child agent failed in module {module_info.file_path}: {str(result)}"
                     print(f"  ERROR: {error_msg}")
                     self.progress['errors'].append(error_msg)
                 else:
@@ -478,6 +572,61 @@ class AgentOrchestrator:
             print(f"  Module {self.progress['completed_modules']}/{self.progress['total_modules']} complete: {module_info.file_path}")
 
             return module_agent
+
+    async def _deploy_class_agent(
+        self,
+        parent_id: str,
+        module_info: ModuleInfo,
+        class_info: Any
+    ) -> Agent:
+        """
+        Deploy an agent for a class.
+        Coordinates analysis of all methods within the class.
+        """
+        class_agent = Agent(
+            id="",
+            scope=AgentScope.CLASS,
+            target=f"{module_info.file_path}::{class_info.name}",
+            status=AgentStatus.ANALYZING,
+            parent_id=parent_id
+        )
+        class_agent = await self.db.create_agent(class_agent)
+
+        # Deploy FUNCTION agents for all methods IN PARALLEL
+        method_tasks = []
+        for method in class_info.methods:
+            task = self._deploy_function_agent(
+                class_agent.id,
+                module_info,
+                f"{class_info.name}.{method.name}",
+                method
+            )
+            method_tasks.append(task)
+
+        # Execute all method agents concurrently
+        method_agents = await asyncio.gather(*method_tasks, return_exceptions=True)
+
+        # Process results
+        valid_method_agents = []
+        for i, result in enumerate(method_agents):
+            if isinstance(result, Exception):
+                error_msg = f"Method analysis failed in class {class_info.name}: {str(result)}"
+                print(f"  ERROR: {error_msg}")
+                self.progress['errors'].append(error_msg)
+            else:
+                valid_method_agents.append(result)
+                class_agent.children_ids.append(result.id)
+
+        # Run class-level analysis
+        await self._run_class_analysis(class_agent, module_info, class_info, valid_method_agents)
+
+        class_agent.update_status(AgentStatus.COMPLETED)
+        await self.db.update_agent(class_agent)
+
+        # Update progress
+        self.progress['completed_classes'] += 1
+
+        return class_agent
 
     async def _deploy_function_agent(
         self,
@@ -681,6 +830,88 @@ Be specific and focus on actionable fixes.""")
             agent.add_message("system", f"Error during analysis: {str(e)}")
             agent.update_status(AgentStatus.ERROR)
 
+    async def _run_subsystem_analysis(self, agent: Agent, subsystem_info: SubsystemInfo):
+        """
+        Run AI-powered analysis on a subsystem (directory/package).
+        Coordinates findings from child subsystems and modules.
+        """
+        start_time = time.time()
+
+        # Collect child findings from all child agents
+        child_findings = []
+        for child_id in agent.children_ids:
+            child_agent = await self.db.get_agent(child_id)
+            if child_agent:
+                child_findings.extend(child_agent.findings)
+
+        # Count modules and classes in this subsystem
+        num_modules = len(subsystem_info.modules)
+        num_subsystems = len(subsystem_info.subsystems)
+        total_classes = sum(len(m.classes) for m in subsystem_info.modules)
+        total_functions = sum(
+            len(m.functions) + sum(len(c.methods) for c in m.classes)
+            for m in subsystem_info.modules
+        )
+
+        context = f"""You are analyzing a subsystem (package/directory) in a Python codebase.
+
+Subsystem: {subsystem_info.name}
+Directory: {subsystem_info.directory}
+Nested subsystems: {num_subsystems}
+Modules: {num_modules}
+Classes: {total_classes}
+Functions: {total_functions}
+
+Key findings from child agents (modules/subsystems):
+{chr(10).join(f'- {f}' for f in child_findings[:15])}  # Limit to first 15
+
+Provide a subsystem-level assessment focusing on:
+1. Package cohesion and organization
+2. Inter-module dependencies and coupling
+3. Architectural patterns and violations
+4. API design and boundaries
+5. Cross-cutting concerns
+
+Be concise and focus on subsystem-level patterns."""
+
+        agent.add_message("user", context)
+
+        try:
+            response = await self._call_ai_with_resilience(
+                max_tokens=1536,
+                messages=[{"role": "user", "content": context}],
+                estimated_tokens=2000
+            )
+
+            analysis = response.content
+            tokens_in = response.input_tokens
+            tokens_out = response.output_tokens
+
+            latency = (time.time() - start_time) * 1000
+            agent.add_message("assistant", analysis, tokens_in, tokens_out, latency_ms=latency)
+
+            findings = [line.strip() for line in analysis.split('\n') if line.strip().startswith('-')]
+            agent.findings.extend(findings)
+
+            # Create subsystem-level card
+            if findings:
+                card = Card(
+                    id="",
+                    type=CardType.ARCHITECTURE,
+                    title=f"Subsystem Review: {subsystem_info.name}",
+                    summary=analysis,
+                    owner_agent=agent.id,
+                    status=CardStatus.NEW
+                )
+                card.links.code.append(subsystem_info.directory)
+
+                card = await self.db.create_card(card)
+                agent.cards_created.append(card.id)
+
+        except Exception as e:
+            agent.add_message("system", f"Error during subsystem analysis: {str(e)}")
+            agent.update_status(AgentStatus.ERROR)
+
     async def _run_module_analysis(self, agent: Agent, module_info: ModuleInfo, child_agents: List[Agent]):
         """Run AI-powered analysis on a module"""
         start_time = time.time()
@@ -750,6 +981,92 @@ Be concise and focus on high-level patterns."""
 
         except Exception as e:
             agent.add_message("system", f"Error during analysis: {str(e)}")
+            agent.update_status(AgentStatus.ERROR)
+
+    async def _run_class_analysis(
+        self,
+        agent: Agent,
+        module_info: ModuleInfo,
+        class_info: Any,
+        method_agents: List[Agent]
+    ):
+        """
+        Run AI-powered analysis on a class.
+        Focuses on class-level design patterns, SOLID principles, and cohesion.
+        """
+        start_time = time.time()
+
+        # Collect method findings
+        method_findings = []
+        for method_agent in method_agents:
+            method_findings.extend(method_agent.findings)
+
+        # Read class source code
+        with open(module_info.file_path, 'r') as f:
+            lines = f.readlines()
+            class_source = ''.join(lines[class_info.line_start - 1:class_info.line_end])
+
+        context = f"""You are analyzing a Python class as part of a hierarchical code review.
+
+File: {module_info.file_path}
+Class: {class_info.name}
+Base classes: {', '.join(class_info.bases) if class_info.bases else 'None'}
+Methods: {len(class_info.methods)}
+Lines: {class_info.line_start}-{class_info.line_end}
+
+Class source:
+```python
+{class_source[:2000]}  # Limit to first 2000 chars
+```
+
+Method-level findings:
+{chr(10).join(f'- {f}' for f in method_findings[:10])}  # Limit to first 10
+
+Provide a class-level assessment focusing on:
+1. SOLID principles (Single Responsibility, Open/Closed, Liskov Substitution, Interface Segregation, Dependency Inversion)
+2. Class cohesion - do methods work together toward a single purpose?
+3. Design patterns used or misused
+4. Encapsulation and information hiding
+5. Class size and complexity (should it be split?)
+
+Be concise and focus on architectural/design issues."""
+
+        agent.add_message("user", context)
+
+        try:
+            response = await self._call_ai_with_resilience(
+                max_tokens=1536,
+                messages=[{"role": "user", "content": context}],
+                estimated_tokens=2000
+            )
+
+            analysis = response.content
+            tokens_in = response.input_tokens
+            tokens_out = response.output_tokens
+
+            latency = (time.time() - start_time) * 1000
+            agent.add_message("assistant", analysis, tokens_in, tokens_out, latency_ms=latency)
+
+            findings = [line.strip() for line in analysis.split('\n') if line.strip().startswith('-')]
+            agent.findings.extend(findings)
+
+            # Create class-level card
+            if findings:
+                card = Card(
+                    id="",
+                    type=CardType.REVIEW,
+                    title=f"Class Review: {class_info.name}",
+                    summary=analysis,
+                    owner_agent=agent.id,
+                    status=CardStatus.NEW
+                )
+                card.links.code.append(f"{module_info.file_path}:{class_info.line_start}")
+
+                card = await self.db.create_card(card)
+                agent.cards_created.append(card.id)
+
+        except Exception as e:
+            agent.add_message("system", f"Error during class analysis: {str(e)}")
             agent.update_status(AgentStatus.ERROR)
 
     async def _run_system_analysis(self, agent: Agent, modules: List[ModuleInfo]):

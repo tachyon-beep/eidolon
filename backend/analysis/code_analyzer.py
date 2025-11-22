@@ -43,6 +43,15 @@ class ModuleInfo:
     docstring: str
 
 
+@dataclass
+class SubsystemInfo:
+    """Information about a subsystem (logical grouping of modules by directory)"""
+    name: str
+    directory: str
+    modules: List[ModuleInfo]
+    subsystems: List['SubsystemInfo']  # Nested subsystems for subdirectories
+
+
 class CodeAnalyzer:
     """Analyzes Python code using AST parsing"""
 
@@ -392,3 +401,110 @@ class CodeAnalyzer:
                         pass
 
         return context
+
+    def group_modules_into_subsystems(self, modules: List[ModuleInfo]) -> List[SubsystemInfo]:
+        """
+        Group modules into subsystems based on directory structure.
+        Creates a hierarchical structure of subsystems for nested directories.
+
+        Args:
+            modules: List of ModuleInfo objects to group
+
+        Returns:
+            List of top-level SubsystemInfo objects (may contain nested subsystems)
+        """
+        if not modules:
+            return []
+
+        # Group modules by their immediate parent directory relative to base_path
+        from collections import defaultdict
+
+        # Build directory tree
+        dir_structure = defaultdict(lambda: {'modules': [], 'subdirs': set()})
+
+        for module in modules:
+            module_path = Path(module.file_path)
+            try:
+                # Get relative path from base_path
+                rel_path = module_path.relative_to(self.base_path)
+                parent_dir = rel_path.parent
+
+                # Track all parent directories
+                current = parent_dir
+                parts = list(current.parts)
+
+                # Build directory hierarchy
+                for i in range(len(parts)):
+                    dir_key = str(Path(*parts[:i+1])) if i > 0 else parts[0]
+                    parent_key = str(Path(*parts[:i])) if i > 0 else '.'
+
+                    if parent_key != '.':
+                        dir_structure[parent_key]['subdirs'].add(dir_key)
+
+                # Add module to its immediate parent directory
+                dir_key = str(parent_dir) if parent_dir != Path('.') else '.'
+                dir_structure[dir_key]['modules'].append(module)
+
+            except ValueError:
+                # If module is not relative to base_path, put in root
+                dir_structure['.']['modules'].append(module)
+
+        # Build subsystem hierarchy recursively
+        def build_subsystem_tree(dir_path: str) -> SubsystemInfo:
+            """Recursively build subsystem tree for a directory"""
+            dir_data = dir_structure[dir_path]
+            dir_name = Path(dir_path).name if dir_path != '.' else 'root'
+
+            # Recursively build child subsystems
+            child_subsystems = []
+            for subdir in sorted(dir_data['subdirs']):
+                # Only include direct children
+                if Path(subdir).parent == Path(dir_path) or (dir_path == '.' and '/' not in subdir and '\\' not in subdir):
+                    child_subsystem = build_subsystem_tree(subdir)
+                    if child_subsystem:
+                        child_subsystems.append(child_subsystem)
+
+            return SubsystemInfo(
+                name=dir_name,
+                directory=str(self.base_path / dir_path) if dir_path != '.' else str(self.base_path),
+                modules=dir_data['modules'],
+                subsystems=child_subsystems
+            )
+
+        # Find all top-level directories (direct children of base_path)
+        top_level_dirs = set()
+        for dir_path in dir_structure.keys():
+            if dir_path == '.':
+                continue
+            path_parts = Path(dir_path).parts
+            if len(path_parts) == 1:
+                top_level_dirs.add(dir_path)
+
+        # Build subsystems for each top-level directory
+        subsystems = []
+        for top_dir in sorted(top_level_dirs):
+            subsystem = build_subsystem_tree(top_dir)
+            if subsystem:
+                subsystems.append(subsystem)
+
+        # If there are modules in the root directory or only one subsystem,
+        # include them at the top level
+        root_modules = dir_structure['.']['modules']
+
+        # If we have no subsystems but have root modules, return empty list
+        # (root modules will be handled directly by SYSTEM agent)
+        if not subsystems:
+            return []
+
+        # If we have root modules AND subsystems, create a root subsystem
+        if root_modules:
+            # Add root modules to a "root" subsystem
+            root_subsystem = SubsystemInfo(
+                name='root',
+                directory=str(self.base_path),
+                modules=root_modules,
+                subsystems=[]
+            )
+            subsystems.insert(0, root_subsystem)
+
+        return subsystems

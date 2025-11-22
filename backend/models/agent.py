@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 class AgentScope(str, Enum):
     SYSTEM = "System"
+    SUBSYSTEM = "Subsystem"
     MODULE = "Module"
     CLASS = "Class"
     FUNCTION = "Function"

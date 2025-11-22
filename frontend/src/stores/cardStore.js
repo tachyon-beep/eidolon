@@ -1,0 +1,158 @@
+import { defineStore } from 'pinia'
+import { ref } from 'vue'
+import axios from 'axios'
+
+const API_BASE = '/api'
+
+export const useCardStore = defineStore('cards', () => {
+  // State
+  const cards = ref([])
+  const agents = ref([])
+  const selectedCard = ref(null)
+  const selectedAgent = ref(null)
+  const isAnalyzing = ref(false)
+
+  // Actions
+  async function fetchCards(filters = {}) {
+    try {
+      const params = new URLSearchParams(filters)
+      const response = await axios.get(`${API_BASE}/cards?${params}`)
+      cards.value = response.data
+    } catch (error) {
+      console.error('Error fetching cards:', error)
+    }
+  }
+
+  async function fetchAgents() {
+    try {
+      const response = await axios.get(`${API_BASE}/agents`)
+      agents.value = response.data
+    } catch (error) {
+      console.error('Error fetching agents:', error)
+    }
+  }
+
+  async function getCard(cardId) {
+    try {
+      const response = await axios.get(`${API_BASE}/cards/${cardId}`)
+      return response.data
+    } catch (error) {
+      console.error('Error fetching card:', error)
+      return null
+    }
+  }
+
+  async function getAgent(agentId) {
+    try {
+      const response = await axios.get(`${API_BASE}/agents/${agentId}`)
+      selectedAgent.value = response.data
+      return response.data
+    } catch (error) {
+      console.error('Error fetching agent:', error)
+      return null
+    }
+  }
+
+  async function getAgentHierarchy(agentId) {
+    try {
+      const response = await axios.get(`${API_BASE}/agents/${agentId}/hierarchy`)
+      return response.data
+    } catch (error) {
+      console.error('Error fetching agent hierarchy:', error)
+      return null
+    }
+  }
+
+  async function updateCard(cardId, updates) {
+    try {
+      const response = await axios.put(`${API_BASE}/cards/${cardId}`, updates)
+      // Update local state
+      const index = cards.value.findIndex(c => c.id === cardId)
+      if (index !== -1) {
+        cards.value[index] = response.data
+      }
+      return response.data
+    } catch (error) {
+      console.error('Error updating card:', error)
+      return null
+    }
+  }
+
+  async function routeCard(cardId, fromTab, toTab) {
+    return await updateCard(cardId, {
+      routing: { from_tab: fromTab, to_tab: toTab }
+    })
+  }
+
+  async function analyzeCodebase(path) {
+    try {
+      isAnalyzing.value = true
+      const response = await axios.post(`${API_BASE}/analyze`, { path })
+      await fetchCards()
+      await fetchAgents()
+      return response.data
+    } catch (error) {
+      console.error('Error analyzing codebase:', error)
+      throw error
+    } finally {
+      isAnalyzing.value = false
+    }
+  }
+
+  function selectCard(card) {
+    selectedCard.value = card
+  }
+
+  function clearSelection() {
+    selectedCard.value = null
+    selectedAgent.value = null
+  }
+
+  function handleWebSocketMessage(message) {
+    switch (message.type) {
+      case 'card_updated':
+        const index = cards.value.findIndex(c => c.id === message.data.id)
+        if (index !== -1) {
+          cards.value[index] = message.data
+        }
+        break
+      case 'card_deleted':
+        cards.value = cards.value.filter(c => c.id !== message.data.id)
+        break
+      case 'analysis_started':
+        isAnalyzing.value = true
+        break
+      case 'analysis_completed':
+        isAnalyzing.value = false
+        fetchCards()
+        fetchAgents()
+        break
+      case 'analysis_error':
+        isAnalyzing.value = false
+        console.error('Analysis error:', message.data.error)
+        break
+    }
+  }
+
+  return {
+    // State
+    cards,
+    agents,
+    selectedCard,
+    selectedAgent,
+    isAnalyzing,
+
+    // Actions
+    fetchCards,
+    fetchAgents,
+    getCard,
+    getAgent,
+    getAgentHierarchy,
+    updateCard,
+    routeCard,
+    analyzeCodebase,
+    selectCard,
+    clearSelection,
+    handleWebSocketMessage
+  }
+})

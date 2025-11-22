@@ -13,6 +13,11 @@ from models import Task, TaskType, TaskStatus, TaskPriority
 from llm_providers import LLMProvider
 from logging_config import get_logger
 
+# Phase 2.5 improvements: structured outputs and role-based prompting
+from planning.agent_selector import IntelligentAgentSelector, AgentRole
+from planning.prompt_templates import PromptTemplateLibrary
+from planning.improved_decomposition import extract_json_from_response
+
 logger = get_logger(__name__)
 
 
@@ -26,8 +31,19 @@ class SystemDecomposer:
     → models subsystem: Add User model with password hashing
     """
 
-    def __init__(self, llm_provider: LLMProvider):
+    def __init__(self, llm_provider: LLMProvider, use_intelligent_selection: bool = True):
+        """
+        Initialize SystemDecomposer with Phase 2.5 improvements
+
+        Args:
+            llm_provider: LLM provider for making API calls
+            use_intelligent_selection: Whether to use intelligent agent role selection (default: True)
+        """
         self.llm_provider = llm_provider
+        self.use_intelligent_selection = use_intelligent_selection
+
+        # Phase 2.5: Intelligent agent selection
+        self.agent_selector = IntelligentAgentSelector(llm_provider) if use_intelligent_selection else None
 
     async def decompose(
         self,
@@ -37,7 +53,7 @@ class SystemDecomposer:
         context: Dict[str, Any] = None
     ) -> List[Task]:
         """
-        Decompose user request into subsystem tasks
+        Decompose user request into subsystem tasks using Phase 2.5 improvements
 
         Args:
             user_request: High-level feature request from user
@@ -50,48 +66,65 @@ class SystemDecomposer:
         """
         context = context or {}
 
-        # Build prompt for AI
-        prompt = f"""You are a system architect decomposing a feature request into subsystem-level tasks.
+        # Phase 2.5 Step 1: Intelligent agent role selection
+        agent_role = AgentRole.DESIGN  # Default role
+        if self.agent_selector:
+            try:
+                selection = await self.agent_selector.select_agent(
+                    user_request=user_request,
+                    project_context={
+                        "subsystems": subsystems,
+                        "project_path": project_path
+                    },
+                    use_llm=True  # Use LLM-powered selection for better accuracy
+                )
+                agent_role = selection["role"]
+                logger.info(
+                    "agent_role_selected",
+                    role=agent_role.value,
+                    confidence=selection.get("confidence", 0.0),
+                    reasoning=selection.get("reasoning", "")
+                )
+            except Exception as e:
+                logger.warning(f"Agent selection failed: {e}, using default DESIGN role")
+                agent_role = AgentRole.DESIGN
 
-User Request: {user_request}
-Project Path: {project_path}
-Available Subsystems: {', '.join(subsystems)}
-
-Your task:
-1. Understand the strategic intent of the request
-2. Identify which subsystems need changes
-3. For each subsystem, define what needs to be done
-4. Identify dependencies between subsystem tasks
-5. Estimate complexity (low/medium/high)
-
-Respond in JSON format:
-{{
-  "understanding": "Brief explanation of what user wants",
-  "subsystem_tasks": [
-    {{
-      "subsystem": "subsystem_name",
-      "instruction": "What this subsystem needs to do",
-      "type": "create_new|modify_existing|refactor",
-      "priority": "critical|high|medium|low",
-      "dependencies": ["other_subsystem_names"],
-      "complexity": "low|medium|high"
-    }}
-  ],
-  "overall_complexity": "low|medium|high"
-}}"""
-
-        # Call LLM
-        response = await self.llm_provider.create_completion(
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=2048,
-            temperature=0.0
+        # Phase 2.5 Step 2: Get role-based prompts
+        prompts = PromptTemplateLibrary.get_system_decomposer_prompt(
+            user_request=user_request,
+            project_path=project_path,
+            subsystems=subsystems,
+            role=agent_role
         )
 
-        # Parse response (in production, use proper JSON parsing with error handling)
-        import json
+        # Phase 2.5 Step 3: Call LLM with structured output support
         try:
-            plan = json.loads(response.content)
-        except:
+            # Try to use JSON mode if supported (OpenAI, Anthropic, some providers)
+            response = await self.llm_provider.create_completion(
+                messages=[
+                    {"role": "system", "content": prompts["system"]},
+                    {"role": "user", "content": prompts["user"]}
+                ],
+                max_tokens=4096,
+                temperature=0.0,
+                response_format={"type": "json_object"}  # Structured output
+            )
+        except (TypeError, Exception) as e:
+            # Fallback if response_format not supported
+            logger.warning(f"Structured output not supported: {e}, using regular mode")
+            response = await self.llm_provider.create_completion(
+                messages=[
+                    {"role": "system", "content": prompts["system"]},
+                    {"role": "user", "content": prompts["user"]}
+                ],
+                max_tokens=4096,
+                temperature=0.0
+            )
+
+        # Phase 2.5 Step 4: Extract JSON with improved parsing
+        plan = extract_json_from_response(response.content)
+
+        if not plan or "subsystem_tasks" not in plan:
             # Fallback: create a simple task structure
             logger.warning("Failed to parse LLM response, using fallback")
             plan = {

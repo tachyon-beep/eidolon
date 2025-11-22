@@ -177,8 +177,8 @@ class TaskGraph(BaseModel):
             if deps_met:
                 ready.append(task)
 
-        # Sort by priority
-        ready.sort(key=lambda t: t.priority.value)
+        # Sort by priority (TaskPriority inherits from int, so can compare directly)
+        ready.sort(key=lambda t: t.priority)
         return ready
 
     def get_blocked_tasks(self) -> List[Task]:

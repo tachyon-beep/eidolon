@@ -112,7 +112,7 @@ class ImplementationOrchestrator:
         logger.info(
             "implementation_started",
             request=user_request,
-            project=project_path
+            project=self.project_path
         )
 
         constraints = constraints or {}
@@ -123,7 +123,7 @@ class ImplementationOrchestrator:
         print("PHASE 1: PLANNING (Top-Down Decomposition)")
         print("=" * 80)
         print(f"\nUser Request: {user_request}")
-        print(f"Project: {project_path}\n")
+        print(f"Project: {self.project_path}\n")
 
         # Step 1: Analyze project structure
         project_structure = await self._analyze_project_structure(self.project_path)

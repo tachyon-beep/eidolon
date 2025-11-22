@@ -159,6 +159,8 @@ import { ref, computed, watch } from 'vue'
 import { useCardStore } from '../stores/cardStore'
 import { storeToRefs } from 'pinia'
 import AgentSnoop from './AgentSnoop.vue'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 
 const cardStore = useCardStore()
 const { selectedCard, selectedAgent } = storeToRefs(cardStore)
@@ -245,16 +247,19 @@ const applyFix = async () => {
 }
 
 const renderMarkdown = (text) => {
-  // Simple markdown rendering (replace with proper library in production)
-  return text
-    .replace(/^### (.*$)/gim, '<h3>$1</h3>')
-    .replace(/^## (.*$)/gim, '<h2>$1</h2>')
-    .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-    .replace(/\*\*(.*)\*\*/gim, '<strong>$1</strong>')
-    .replace(/\*(.*)\*/gim, '<em>$1</em>')
-    .replace(/```(\w+)?\n([\s\S]*?)```/gim, '<pre><code>$2</code></pre>')
-    .replace(/`([^`]+)`/gim, '<code>$1</code>')
-    .replace(/\n/gim, '<br>')
+  if (!text) return ''
+  try {
+    // Parse markdown to HTML
+    const rawHtml = marked.parse(text)
+    // Sanitize HTML to prevent XSS attacks
+    return DOMPurify.sanitize(rawHtml, {
+      ALLOWED_TAGS: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'strong', 'em', 'code', 'pre', 'ul', 'ol', 'li', 'br', 'a'],
+      ALLOWED_ATTR: ['href', 'title']
+    })
+  } catch (error) {
+    console.error('Markdown rendering error:', error)
+    return text
+  }
 }
 
 const formatTime = (timestamp) => {

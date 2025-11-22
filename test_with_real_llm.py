@@ -228,10 +228,10 @@ async def run_all_tests():
 
     try:
         # Test 1: Simple calculator
-        await test_simple_calculator_real_llm()
+        # await test_simple_calculator_real_llm()
 
         # Test 2: REST API (multi-subsystem)
-        # await test_rest_api_real_llm()
+        await test_rest_api_real_llm()
 
         print("\n" + "=" * 80)
         print("ALL REAL LLM TESTS COMPLETE")

@@ -228,6 +228,10 @@ Respond in JSON format:
             if existing_modules:
                 # Use first existing module (or could use all of them)
                 module_name = existing_modules[0]
+
+                # Prepend subsystem directory if not root
+                if task.target != "root":
+                    module_name = f"{task.target}/{module_name}"
             else:
                 # No existing modules, create new one
                 module_name = "main.py" if task.target == "root" else f"{task.target}/main.py"

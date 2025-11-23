@@ -192,12 +192,29 @@ class OpenAICompatibleProvider(LLMProvider):
                 model="meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
             )
         """
-        self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        # Check for API key from multiple sources
+        self.api_key = (
+            api_key
+            or os.environ.get("OPENAI_API_KEY")
+            or os.environ.get("OPENROUTER_API_KEY")
+        )
         if not self.api_key:
-            raise ValueError("OPENAI_API_KEY not set")
+            raise ValueError("OPENAI_API_KEY or OPENROUTER_API_KEY not set")
 
-        self.base_url = base_url or os.environ.get("OPENAI_BASE_URL")
-        self.model = model or os.environ.get("OPENAI_MODEL", "gpt-4-turbo")
+        # Check for base URL from multiple sources
+        self.base_url = (
+            base_url
+            or os.environ.get("OPENAI_BASE_URL")
+            or os.environ.get("OPENROUTER_BASE_URL")
+        )
+
+        # Check for model from multiple sources
+        self.model = (
+            model
+            or os.environ.get("OPENAI_MODEL")
+            or os.environ.get("OPENROUTER_MODEL")
+            or "gpt-4-turbo"
+        )
 
         # Create client
         client_kwargs = {"api_key": self.api_key}

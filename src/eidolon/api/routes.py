@@ -206,6 +206,15 @@ def create_routes(db: Database, orchestrator: AgentOrchestrator):
                 "data": {"path": str(analysis_path)}
             })
 
+            # Set up activity callback for real-time updates
+            async def activity_callback(activity):
+                await manager.broadcast({
+                    "type": "activity_update",
+                    "data": activity
+                })
+
+            orchestrator.set_activity_callback(activity_callback)
+
             # Start a background task to send progress updates
             async def send_progress_updates():
                 while True:

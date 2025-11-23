@@ -75,57 +75,110 @@ onMounted(() => {
 .code-view {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 28px;
+  animation: slideIn 0.5s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.view-header {
+  position: relative;
+}
+
+.view-header::before {
+  content: '';
+  position: absolute;
+  left: -40px;
+  top: 0;
+  width: 3px;
+  height: 60px;
+  background: linear-gradient(180deg, var(--amber-primary), transparent);
+  border-radius: 2px;
 }
 
 .view-header h1 {
-  font-size: 28px;
-  font-weight: 600;
-  color: #e0e0e0;
-  margin-bottom: 6px;
+  font-family: var(--font-display);
+  font-size: 36px;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+  letter-spacing: -0.5px;
+  background: linear-gradient(135deg, var(--text-primary), var(--amber-bright));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .view-subtitle {
   font-size: 13px;
-  color: #888;
+  color: var(--text-secondary);
+  font-weight: 500;
+  letter-spacing: 0.3px;
 }
 
 .filter-bar {
   display: flex;
-  gap: 16px;
+  gap: 20px;
   align-items: center;
-  padding: 12px 16px;
-  background: #111;
-  border: 1px solid #222;
-  border-radius: 6px;
+  padding: 16px 20px;
+  background: rgba(30, 30, 52, 0.3);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(167, 139, 250, 0.12);
+  border-radius: 12px;
 }
 
 .filter-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .filter-group label {
-  font-size: 12px;
-  color: #888;
-  font-weight: 500;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .filter-select {
-  padding: 6px 10px;
-  background: #1a1a1a;
-  border: 1px solid #2a2a2a;
-  border-radius: 4px;
-  color: #e0e0e0;
+  padding: 8px 12px;
+  background: rgba(30, 30, 52, 0.6);
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-family: var(--font-display);
   font-size: 12px;
   cursor: pointer;
+  transition: all 0.2s;
+}
+
+.filter-select:focus {
+  outline: none;
+  border-color: var(--purple-soft);
+  box-shadow: 0 0 0 2px var(--purple-glow);
 }
 
 .stats {
   margin-left: auto;
+  font-family: var(--font-display);
   font-size: 12px;
-  color: #666;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 6px 12px;
+  background: rgba(167, 139, 250, 0.08);
+  border-radius: 8px;
+  border: 1px solid rgba(167, 139, 250, 0.15);
 }
 
 .empty-state {
@@ -133,31 +186,71 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 60px 20px;
+  padding: 80px 20px;
   text-align: center;
+  background: rgba(30, 30, 52, 0.2);
+  border: 2px dashed rgba(167, 139, 250, 0.2);
+  border-radius: 16px;
 }
 
 .empty-icon {
-  font-size: 64px;
-  margin-bottom: 16px;
-  opacity: 0.3;
+  font-size: 72px;
+  margin-bottom: 20px;
+  opacity: 0.2;
+  filter: grayscale(1);
 }
 
 .empty-state h2 {
-  font-size: 20px;
-  font-weight: 600;
-  color: #666;
-  margin-bottom: 8px;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
 }
 
 .empty-state p {
   font-size: 14px;
-  color: #555;
+  color: var(--text-muted);
+  max-width: 400px;
 }
 
 .cards-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 20px;
+  animation: cardsAppear 0.6s ease-out;
+}
+
+@keyframes cardsAppear {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.cards-grid > * {
+  animation: cardSlideIn 0.4s ease-out backwards;
+}
+
+.cards-grid > *:nth-child(1) { animation-delay: 0.05s; }
+.cards-grid > *:nth-child(2) { animation-delay: 0.1s; }
+.cards-grid > *:nth-child(3) { animation-delay: 0.15s; }
+.cards-grid > *:nth-child(4) { animation-delay: 0.2s; }
+.cards-grid > *:nth-child(5) { animation-delay: 0.25s; }
+.cards-grid > *:nth-child(6) { animation-delay: 0.3s; }
+
+@keyframes cardSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 </style>

@@ -508,7 +508,6 @@ Use the available tools to explore the codebase before finalizing your analysis.
                     "messages": messages,
                     "max_tokens": 3072,
                     "temperature": 0.0,
-                    "response_format": {"type": "json_object"},
                 }
 
                 if use_tools:
@@ -516,7 +515,10 @@ Use the available tools to explore the codebase before finalizing your analysis.
                     call_params["tool_choice"] = "auto"
                 # Note: Claude follows JSON prompts well without response_format
 
-                response = await self.llm_provider.create_completion(**call_params)
+                response = await self.llm_provider.create_completion(
+                    response_format={"type": "json_object"},
+                    **call_params,
+                )
 
             except (TypeError, Exception) as e:
                 logger.warning(f"Advanced features not supported: {e}, using regular mode")

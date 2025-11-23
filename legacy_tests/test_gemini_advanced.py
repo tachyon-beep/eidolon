@@ -182,7 +182,7 @@ async def test_code_review_system():
         # Group by subsystem
         subsystems = {}
         for py_file in py_files:
-            if ".monad_backups" not in str(py_file):
+            if ".eidolon_backups" not in str(py_file):
                 rel_path = py_file.relative_to(project_path)
                 subsystem = rel_path.parts[0] if len(rel_path.parts) > 1 else "root"
                 subsystems[subsystem] = subsystems.get(subsystem, 0) + 1
@@ -199,7 +199,7 @@ async def test_code_review_system():
         files_with_type_hints = 0
 
         for py_file in py_files:
-            if ".monad_backups" not in str(py_file):
+            if ".eidolon_backups" not in str(py_file):
                 try:
                     content = py_file.read_text()
                     total_lines += len(content.split('\n'))

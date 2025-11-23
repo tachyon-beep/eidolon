@@ -141,7 +141,7 @@ async def test_scenario_1_add_authentication():
 
     # Check what was created
     print("\n📝 Files Modified/Created:")
-    backup_dir = Path("/tmp/test_rest_api/.monad_backups")
+    backup_dir = Path("/tmp/test_rest_api/.eidolon_backups")
     if backup_dir.exists():
         backups = list(backup_dir.rglob("*.py"))
         print(f"   Backups created: {len(backups)}")
@@ -283,14 +283,14 @@ async def test_scenario_4_file_stats():
     # Get current file sizes
     print("\n📏 Current File Sizes:")
     for py_file in sorted(project_path.rglob("*.py")):
-        if ".monad_backups" not in str(py_file):
+        if ".eidolon_backups" not in str(py_file):
             rel_path = py_file.relative_to(project_path)
             size = len(py_file.read_text())
             lines = len(py_file.read_text().splitlines())
             print(f"   {str(rel_path):40s} {lines:4d} lines ({size:6d} bytes)")
 
     # Check backup history
-    backup_dir = project_path / ".monad_backups"
+    backup_dir = project_path / ".eidolon_backups"
     if backup_dir.exists():
         sessions = [d for d in backup_dir.iterdir() if d.is_dir()]
         print(f"\n💾 Backup Sessions: {len(sessions)}")

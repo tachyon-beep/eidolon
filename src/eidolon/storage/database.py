@@ -1,5 +1,6 @@
 import json
 import aiosqlite
+import asyncio
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,17 +14,23 @@ class Database:
     def __init__(self, db_path: str = "monad.db"):
         self.db_path = db_path
         self.db: Optional[aiosqlite.Connection] = None
+        # Serialize transactional operations to avoid nested transaction errors
+        self._txn_lock = asyncio.Lock()
+        # Serialize all cursor usage; aiosqlite connection is not concurrent-safe
+        self._db_lock = asyncio.Lock()
 
     async def connect(self):
         """Initialize database connection and create tables"""
-        self.db = await aiosqlite.connect(self.db_path)
-        self.db.row_factory = aiosqlite.Row
-        await self._create_tables()
+        async with self._db_lock:
+            self.db = await aiosqlite.connect(self.db_path)
+            self.db.row_factory = aiosqlite.Row
+            await self._create_tables()
 
     async def close(self):
         """Close database connection"""
         if self.db:
-            await self.db.close()
+            async with self._db_lock:
+                await self.db.close()
 
     async def _create_tables(self):
         """Create database tables if they don't exist"""
@@ -119,7 +126,7 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_agents_scope ON agents(scope)
             """)
 
-            await self.db.commit()
+        await self.db.commit()
 
     async def _get_next_sequence(self, name: str) -> int:
         """
@@ -127,12 +134,13 @@ class Database:
 
         Uses UPDATE...RETURNING to avoid race conditions in concurrent environments.
         """
-        async with self.db.execute("BEGIN IMMEDIATE"):
-            # Ensure sequence exists
-            await self.db.execute(
-                "INSERT OR IGNORE INTO sequences (name, value) VALUES (?, 0)",
-                (name,)
-            )
+        async with self._db_lock:
+            async with self._txn_lock:
+                # Ensure sequence exists
+                await self.db.execute(
+                    "INSERT OR IGNORE INTO sequences (name, value) VALUES (?, 0)",
+                    (name,)
+                )
             # Atomic increment and return
             cursor = await self.db.execute(
                 "UPDATE sequences SET value = value + 1 WHERE name = ? RETURNING value",
@@ -159,40 +167,42 @@ class Database:
         if not card.id or not card.id.startswith("Eidolon-"):
             card.id = await self.generate_card_id(card.type)
 
-        async with self.db.cursor() as cursor:
-            await cursor.execute("""
-                INSERT INTO cards (
-                    id, type, title, summary, status, priority, owner_agent,
-                    parent, children, links, metrics, log, routing,
-                    proposed_fix, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                card.id,
-                card.type,
-                card.title,
-                card.summary,
-                card.status,
-                card.priority,
-                card.owner_agent,
-                card.parent,
-                json.dumps(card.children),
-                json.dumps(card.links.model_dump()),
-                json.dumps(card.metrics.model_dump()),
-                json.dumps([log.model_dump() for log in card.log], default=str),
-                json.dumps(card.routing.model_dump()),
-                json.dumps(card.proposed_fix.model_dump()) if card.proposed_fix else None,
-                card.created_at.isoformat(),
-                card.updated_at.isoformat()
-            ))
-            await self.db.commit()
+        async with self._db_lock:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    INSERT INTO cards (
+                        id, type, title, summary, status, priority, owner_agent,
+                        parent, children, links, metrics, log, routing,
+                        proposed_fix, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    card.id,
+                    card.type,
+                    card.title,
+                    card.summary,
+                    card.status,
+                    card.priority,
+                    card.owner_agent,
+                    card.parent,
+                    json.dumps(card.children),
+                    json.dumps(card.links.model_dump()),
+                    json.dumps(card.metrics.model_dump()),
+                    json.dumps([log.model_dump() for log in card.log], default=str),
+                    json.dumps(card.routing.model_dump()),
+                    json.dumps(card.proposed_fix.model_dump()) if card.proposed_fix else None,
+                    card.created_at.isoformat(),
+                    card.updated_at.isoformat()
+                ))
+                await self.db.commit()
 
         return card
 
     async def get_card(self, card_id: str) -> Optional[Card]:
         """Get a card by ID"""
-        async with self.db.cursor() as cursor:
-            await cursor.execute("SELECT * FROM cards WHERE id = ?", (card_id,))
-            row = await cursor.fetchone()
+        async with self._db_lock:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("SELECT * FROM cards WHERE id = ?", (card_id,))
+                row = await cursor.fetchone()
 
         if not row:
             return None
@@ -221,9 +231,10 @@ class Database:
 
         query += " ORDER BY created_at DESC"
 
-        async with self.db.cursor() as cursor:
-            await cursor.execute(query, params)
-            rows = await cursor.fetchall()
+        async with self._db_lock:
+            async with self.db.cursor() as cursor:
+                await cursor.execute(query, params)
+                rows = await cursor.fetchall()
 
         return [self._row_to_card(row) for row in rows]
 
@@ -231,39 +242,41 @@ class Database:
         """Update an existing card"""
         card.updated_at = datetime.now(timezone.utc)
 
-        async with self.db.cursor() as cursor:
-            await cursor.execute("""
-                UPDATE cards SET
-                    type = ?, title = ?, summary = ?, status = ?, priority = ?,
-                    owner_agent = ?, parent = ?, children = ?, links = ?,
-                    metrics = ?, log = ?, routing = ?, proposed_fix = ?, updated_at = ?
-                WHERE id = ?
-            """, (
-                card.type,
-                card.title,
-                card.summary,
-                card.status,
-                card.priority,
-                card.owner_agent,
-                card.parent,
-                json.dumps(card.children),
-                json.dumps(card.links.model_dump()),
-                json.dumps(card.metrics.model_dump()),
-                json.dumps([log.model_dump() for log in card.log], default=str),
-                json.dumps(card.routing.model_dump()),
-                json.dumps(card.proposed_fix.model_dump()) if card.proposed_fix else None,
-                card.updated_at.isoformat(),
-                card.id
-            ))
-            await self.db.commit()
+        async with self._db_lock:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    UPDATE cards SET
+                        type = ?, title = ?, summary = ?, status = ?, priority = ?,
+                        owner_agent = ?, parent = ?, children = ?, links = ?,
+                        metrics = ?, log = ?, routing = ?, proposed_fix = ?, updated_at = ?
+                    WHERE id = ?
+                """, (
+                    card.type,
+                    card.title,
+                    card.summary,
+                    card.status,
+                    card.priority,
+                    card.owner_agent,
+                    card.parent,
+                    json.dumps(card.children),
+                    json.dumps(card.links.model_dump()),
+                    json.dumps(card.metrics.model_dump()),
+                    json.dumps([log.model_dump() for log in card.log], default=str),
+                    json.dumps(card.routing.model_dump()),
+                    json.dumps(card.proposed_fix.model_dump()) if card.proposed_fix else None,
+                    card.updated_at.isoformat(),
+                    card.id
+                ))
+                await self.db.commit()
 
         return card
 
     async def delete_card(self, card_id: str):
         """Delete a card"""
-        async with self.db.cursor() as cursor:
-            await cursor.execute("DELETE FROM cards WHERE id = ?", (card_id,))
-            await self.db.commit()
+        async with self._db_lock:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("DELETE FROM cards WHERE id = ?", (card_id,))
+                await self.db.commit()
 
     # Agent operations
     async def create_agent(self, agent: Agent) -> Agent:
@@ -271,40 +284,42 @@ class Database:
         if not agent.id or not agent.id.startswith("AGN-"):
             agent.id = await self.generate_agent_id(agent.scope)
 
-        async with self.db.cursor() as cursor:
-            await cursor.execute("""
-                INSERT INTO agents (
-                    id, scope, target, status, parent_id, children_ids,
-                    session_id, messages, snapshots, findings, cards_created,
-                    created_at, started_at, completed_at, total_tokens, total_cost
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                agent.id,
-                agent.scope,
-                agent.target,
-                agent.status,
-                agent.parent_id,
-                json.dumps(agent.children_ids),
-                agent.session_id,
-                json.dumps([msg.model_dump() for msg in agent.messages], default=str),
-                json.dumps([snap.model_dump() for snap in agent.snapshots], default=str),
-                json.dumps(agent.findings),
-                json.dumps(agent.cards_created),
-                agent.created_at.isoformat(),
-                agent.started_at.isoformat() if agent.started_at else None,
-                agent.completed_at.isoformat() if agent.completed_at else None,
-                agent.total_tokens,
-                agent.total_cost
-            ))
-            await self.db.commit()
+        async with self._db_lock:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    INSERT INTO agents (
+                        id, scope, target, status, parent_id, children_ids,
+                        session_id, messages, snapshots, findings, cards_created,
+                        created_at, started_at, completed_at, total_tokens, total_cost
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    agent.id,
+                    agent.scope,
+                    agent.target,
+                    agent.status,
+                    agent.parent_id,
+                    json.dumps(agent.children_ids),
+                    agent.session_id,
+                    json.dumps([msg.model_dump() for msg in agent.messages], default=str),
+                    json.dumps([snap.model_dump() for snap in agent.snapshots], default=str),
+                    json.dumps(agent.findings),
+                    json.dumps(agent.cards_created),
+                    agent.created_at.isoformat(),
+                    agent.started_at.isoformat() if agent.started_at else None,
+                    agent.completed_at.isoformat() if agent.completed_at else None,
+                    agent.total_tokens,
+                    agent.total_cost
+                ))
+                await self.db.commit()
 
         return agent
 
     async def get_agent(self, agent_id: str) -> Optional[Agent]:
         """Get an agent by ID"""
-        async with self.db.cursor() as cursor:
-            await cursor.execute("SELECT * FROM agents WHERE id = ?", (agent_id,))
-            row = await cursor.fetchone()
+        async with self._db_lock:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("SELECT * FROM agents WHERE id = ?", (agent_id,))
+                row = await cursor.fetchone()
 
         if not row:
             return None
@@ -313,41 +328,43 @@ class Database:
 
     async def get_all_agents(self) -> List[Agent]:
         """Get all agents"""
-        async with self.db.cursor() as cursor:
-            await cursor.execute("SELECT * FROM agents ORDER BY created_at DESC")
-            rows = await cursor.fetchall()
+        async with self._db_lock:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("SELECT * FROM agents ORDER BY created_at DESC")
+                rows = await cursor.fetchall()
 
         return [self._row_to_agent(row) for row in rows]
 
     async def update_agent(self, agent: Agent) -> Agent:
         """Update an existing agent"""
-        async with self.db.cursor() as cursor:
-            await cursor.execute("""
-                UPDATE agents SET
-                    scope = ?, target = ?, status = ?, parent_id = ?,
-                    children_ids = ?, session_id = ?, messages = ?,
-                    snapshots = ?, findings = ?, cards_created = ?,
-                    started_at = ?, completed_at = ?, total_tokens = ?,
-                    total_cost = ?
-                WHERE id = ?
-            """, (
-                agent.scope,
-                agent.target,
-                agent.status,
-                agent.parent_id,
-                json.dumps(agent.children_ids),
-                agent.session_id,
-                json.dumps([msg.dict() for msg in agent.messages], default=str),
-                json.dumps([snap.dict() for snap in agent.snapshots], default=str),
-                json.dumps(agent.findings),
-                json.dumps(agent.cards_created),
-                agent.started_at.isoformat() if agent.started_at else None,
-                agent.completed_at.isoformat() if agent.completed_at else None,
-                agent.total_tokens,
-                agent.total_cost,
-                agent.id
-            ))
-            await self.db.commit()
+        async with self._db_lock:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    UPDATE agents SET
+                        scope = ?, target = ?, status = ?, parent_id = ?,
+                        children_ids = ?, session_id = ?, messages = ?,
+                        snapshots = ?, findings = ?, cards_created = ?,
+                        started_at = ?, completed_at = ?, total_tokens = ?,
+                        total_cost = ?
+                    WHERE id = ?
+                """, (
+                    agent.scope,
+                    agent.target,
+                    agent.status,
+                    agent.parent_id,
+                    json.dumps(agent.children_ids),
+                    agent.session_id,
+                    json.dumps([msg.dict() for msg in agent.messages], default=str),
+                    json.dumps([snap.dict() for snap in agent.snapshots], default=str),
+                    json.dumps(agent.findings),
+                    json.dumps(agent.cards_created),
+                    agent.started_at.isoformat() if agent.started_at else None,
+                    agent.completed_at.isoformat() if agent.completed_at else None,
+                    agent.total_tokens,
+                    agent.total_cost,
+                    agent.id
+                ))
+                await self.db.commit()
 
         return agent
 
@@ -403,20 +420,21 @@ class Database:
         git_branch: Optional[str] = None
     ) -> str:
         """Create a new analysis session"""
-        async with self.db.cursor() as cursor:
-            await cursor.execute("""
-                INSERT INTO analysis_sessions
-                (id, path, mode, git_commit, git_branch, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                session_id,
-                path,
-                mode,
-                git_commit,
-                git_branch,
-                datetime.now(timezone.utc).isoformat()
-            ))
-            await self.db.commit()
+        async with self._db_lock:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    INSERT INTO analysis_sessions
+                    (id, path, mode, git_commit, git_branch, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    session_id,
+                    path,
+                    mode,
+                    git_commit,
+                    git_branch,
+                    datetime.now(timezone.utc).isoformat()
+                ))
+                await self.db.commit()
 
         return session_id
 
@@ -431,39 +449,41 @@ class Database:
         cache_misses: int
     ):
         """Update an analysis session with completion data"""
-        async with self.db.cursor() as cursor:
-            await cursor.execute("""
-                UPDATE analysis_sessions SET
-                    files_analyzed = ?,
-                    files_skipped = ?,
-                    total_modules = ?,
-                    total_functions = ?,
-                    cache_hits = ?,
-                    cache_misses = ?,
-                    completed_at = ?
-                WHERE id = ?
-            """, (
-                json.dumps(files_analyzed),
-                json.dumps(files_skipped),
-                total_modules,
-                total_functions,
-                cache_hits,
-                cache_misses,
-                datetime.now(timezone.utc).isoformat(),
-                session_id
-            ))
-            await self.db.commit()
+        async with self._db_lock:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    UPDATE analysis_sessions SET
+                        files_analyzed = ?,
+                        files_skipped = ?,
+                        total_modules = ?,
+                        total_functions = ?,
+                        cache_hits = ?,
+                        cache_misses = ?,
+                        completed_at = ?
+                    WHERE id = ?
+                """, (
+                    json.dumps(files_analyzed),
+                    json.dumps(files_skipped),
+                    total_modules,
+                    total_functions,
+                    cache_hits,
+                    cache_misses,
+                    datetime.now(timezone.utc).isoformat(),
+                    session_id
+                ))
+                await self.db.commit()
 
     async def get_last_analysis_session(self, path: str) -> Optional[Dict[str, Any]]:
         """Get the most recent analysis session for a given path"""
-        async with self.db.cursor() as cursor:
-            await cursor.execute("""
-                SELECT * FROM analysis_sessions
-                WHERE path = ? AND completed_at IS NOT NULL
-                ORDER BY created_at DESC
-                LIMIT 1
-            """, (path,))
-            row = await cursor.fetchone()
+        async with self._db_lock:
+            async with self.db.cursor() as cursor:
+                await cursor.execute("""
+                    SELECT * FROM analysis_sessions
+                    WHERE path = ? AND completed_at IS NOT NULL
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """, (path,))
+                row = await cursor.fetchone()
 
         if not row:
             return None

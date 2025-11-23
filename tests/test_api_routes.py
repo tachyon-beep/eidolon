@@ -31,6 +31,7 @@ class FakeOrchestrator:
     def __init__(self):
         self.analyzed_paths = []
         self.incremental_calls = []
+        self.activity_callback = None
 
     async def analyze_codebase(self, path: str):
         self.analyzed_paths.append(path)
@@ -51,6 +52,9 @@ class FakeOrchestrator:
 
     def get_progress(self):
         return {"percentage": 0}
+
+    def set_activity_callback(self, callback):
+        self.activity_callback = callback
 
 
 class FakeAnalysisContext:

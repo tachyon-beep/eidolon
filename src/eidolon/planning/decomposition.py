@@ -227,7 +227,7 @@ class SystemDecomposer:
                 call_params = {
                     "messages": messages,
                     "max_tokens": 4096,
-                    "temperature": 0.0
+                    "temperature": 0.0,
                 }
 
                 if use_design_tools:
@@ -245,14 +245,18 @@ class SystemDecomposer:
                         message_roles=[m.get("role") if isinstance(m, dict) else getattr(m, "role", "unknown") for m in messages]
                     )
 
-                response = await self.llm_provider.create_completion(**call_params)
+                response = await self.llm_provider.create_completion(
+                    response_format={"type": "json_object"},
+                    **call_params,
+                )
 
             except (TypeError, Exception) as e:
                 logger.warning(f"Advanced features not supported: {e}, using regular mode")
                 response = await self.llm_provider.create_completion(
                     messages=messages,
                     max_tokens=4096,
-                    temperature=0.0
+                    temperature=0.0,
+                    response_format={"type": "json_object"},
                 )
 
             # Phase 4C: Check if LLM made design tool calls
@@ -624,7 +628,7 @@ class SubsystemDecomposer:
                 call_params = {
                     "messages": messages,
                     "max_tokens": 2048,
-                    "temperature": 0.0
+                    "temperature": 0.0,
                 }
 
                 if use_design_tools:
@@ -633,14 +637,18 @@ class SubsystemDecomposer:
                     call_params["tool_choice"] = "auto"
                 # Note: Claude follows JSON prompts well without response_format
 
-                response = await self.llm_provider.create_completion(**call_params)
+                response = await self.llm_provider.create_completion(
+                    response_format={"type": "json_object"},
+                    **call_params,
+                )
 
             except (TypeError, Exception) as e:
                 logger.warning(f"Advanced features not supported: {e}, using regular mode")
                 response = await self.llm_provider.create_completion(
                     messages=messages,
                     max_tokens=2048,
-                    temperature=0.0
+                    temperature=0.0,
+                    response_format={"type": "json_object"},
                 )
 
             # Phase 4C: Check if LLM made design tool calls
@@ -998,7 +1006,7 @@ class ModuleDecomposer:
                 call_params = {
                     "messages": messages,
                     "max_tokens": 2048,
-                    "temperature": 0.0
+                    "temperature": 0.0,
                 }
 
                 # Add design tools if available (Phase 4C)
@@ -1008,7 +1016,10 @@ class ModuleDecomposer:
                     call_params["tool_choice"] = "auto"
                 # Note: Claude follows JSON prompts well without response_format
 
-                response = await self.llm_provider.create_completion(**call_params)
+                response = await self.llm_provider.create_completion(
+                    response_format={"type": "json_object"},
+                    **call_params,
+                )
 
             except (TypeError, Exception) as e:
                 # Fallback if tools/response_format not supported
@@ -1016,7 +1027,8 @@ class ModuleDecomposer:
                 response = await self.llm_provider.create_completion(
                     messages=messages,
                     max_tokens=2048,
-                    temperature=0.0
+                    temperature=0.0,
+                    response_format={"type": "json_object"},
                 )
 
             # Phase 4C: Check if LLM made design tool calls
@@ -1360,7 +1372,8 @@ class ClassDecomposer:
                     {"role": "user", "content": prompts["user"]}
                 ],
                 max_tokens=2048,
-                temperature=0.0
+                temperature=0.0,
+                response_format={"type": "json_object"},
                 # Note: Claude follows JSON prompts well without response_format
             )
         except (TypeError, Exception) as e:
@@ -1372,7 +1385,8 @@ class ClassDecomposer:
                     {"role": "user", "content": prompts["user"]}
                 ],
                 max_tokens=2048,
-                temperature=0.0
+                temperature=0.0,
+                response_format={"type": "json_object"},
             )
 
         # Phase 2.5 Step 4: Extract JSON with improved parsing
@@ -1644,7 +1658,7 @@ class FunctionPlanner:
                 call_params = {
                     "messages": messages,
                     "max_tokens": 3072,
-                    "temperature": 0.0
+                    "temperature": 0.0,
                 }
 
                 # Add tools if available (Phase 4)
@@ -1654,7 +1668,10 @@ class FunctionPlanner:
                     call_params["tool_choice"] = "auto"
                 # Note: Claude follows JSON prompts well without response_format
 
-                response = await self.llm_provider.create_completion(**call_params)
+                response = await self.llm_provider.create_completion(
+                    response_format={"type": "json_object"},
+                    **call_params,
+                )
 
             except (TypeError, Exception) as e:
                 # Fallback if tools/response_format not supported
@@ -1662,7 +1679,8 @@ class FunctionPlanner:
                 response = await self.llm_provider.create_completion(
                     messages=messages,
                     max_tokens=3072,
-                    temperature=0.0
+                    temperature=0.0,
+                    response_format={"type": "json_object"},
                 )
 
             # Phase 4: Check if LLM made tool calls

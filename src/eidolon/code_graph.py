@@ -410,7 +410,7 @@ class CodeGraphAnalyzer:
 {element.source_code[:500]}  # Truncated to 500 chars
 ```
 
-Provide a brief analysis:
+        Provide a brief analysis:
 1. One-sentence description of what it does
 2. Purpose/role in the codebase
 3. Complexity level (simple/medium/complex)
@@ -429,7 +429,8 @@ Respond in JSON format:
                 {"role": "user", "content": prompt}
             ],
             max_tokens=200,
-            temperature=0.0
+            temperature=0.0,
+            response_format={"type": "json_object"},
         )
 
         # Parse JSON response

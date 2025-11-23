@@ -13,6 +13,7 @@ export const useCardStore = defineStore('cards', () => {
   const isAnalyzing = ref(false)
   const analysisProgress = ref(null)
   const cacheStats = ref(null)
+  const recentActivities = ref([])  // Recent activity log
 
   // Actions
   async function fetchCards(filters = {}) {
@@ -156,6 +157,15 @@ export const useCardStore = defineStore('cards', () => {
       case 'analysis_started':
         isAnalyzing.value = true
         analysisProgress.value = null
+        recentActivities.value = []  // Clear old activities
+        break
+      case 'activity_update':
+        // Add new activity to the front of the list
+        recentActivities.value.unshift(message.data)
+        // Keep only last 20 activities
+        if (recentActivities.value.length > 20) {
+          recentActivities.value.pop()
+        }
         break
       case 'analysis_progress':
         analysisProgress.value = message.data
@@ -186,6 +196,7 @@ export const useCardStore = defineStore('cards', () => {
     isAnalyzing,
     analysisProgress,
     cacheStats,
+    recentActivities,
 
     // Actions
     fetchCards,

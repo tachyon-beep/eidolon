@@ -29,7 +29,7 @@ class CodeWriter:
 
     def __init__(self, project_path: str, backup_dir: Optional[str] = None):
         self.project_path = Path(project_path)
-        self.backup_dir = Path(backup_dir) if backup_dir else self.project_path / ".monad_backups"
+        self.backup_dir = Path(backup_dir) if backup_dir else self.project_path / ".eidolon_backups"
         self.session_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
         # Track all changes in this session

@@ -203,7 +203,7 @@ async def test_rest_api_real_llm():
 
     # Check what files were modified
     print("\n📝 Files Modified:")
-    backup_dir = Path("/tmp/test_rest_api/.monad_backups")
+    backup_dir = Path("/tmp/test_rest_api/.eidolon_backups")
     if backup_dir.exists():
         sessions = [d for d in backup_dir.iterdir() if d.is_dir()]
         if sessions:

@@ -223,9 +223,9 @@ class CacheManager:
                 file_hash,
                 scope,
                 target,
-                json.dumps(findings),
-                json.dumps(cards_data),
-                json.dumps(metrics),
+                json.dumps(findings, default=str),
+                json.dumps(cards_data, default=str),
+                json.dumps(metrics, default=str),
                 now,
                 now
             ))

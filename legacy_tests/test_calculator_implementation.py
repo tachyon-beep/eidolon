@@ -76,7 +76,7 @@ async def test_scenario_1_create_new():
         print(f"\n❌ calculator.py not found")
 
     # Check backups
-    backup_dir = Path("/tmp/test_calculator/.monad_backups")
+    backup_dir = Path("/tmp/test_calculator/.eidolon_backups")
     if backup_dir.exists():
         backups = list(backup_dir.glob("**/*.py"))
         print(f"\n💾 Backups created: {len(backups)}")
@@ -164,7 +164,7 @@ async def test_scenario_3_file_io_and_backups():
 
     # Test 3: Check backups
     print("\n3. Checking backups...")
-    backups = list(Path("/tmp/test_calculator/.monad_backups").glob("**/*"))
+    backups = list(Path("/tmp/test_calculator/.eidolon_backups").glob("**/*"))
     print(f"   Total backups: {len(backups)}")
     for backup in backups:
         if backup.is_file():

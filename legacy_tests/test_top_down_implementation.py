@@ -10,18 +10,21 @@ import asyncio
 import sys
 from pathlib import Path
 
-# Add backend to path
-sys.path.insert(0, str(Path(__file__).parent / 'backend'))
+# Add project src to path (Eidolon layout)
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PROJECT_ROOT / "src"
+if str(SRC_PATH) not in sys.path:
+    sys.path.insert(0, str(SRC_PATH))
 
-from agents import ImplementationOrchestrator
-from storage import Database
-from llm_providers import create_provider
+from eidolon.agents import ImplementationOrchestrator
+from eidolon.storage import Database
+from eidolon.llm_providers import create_provider
 
 
 async def main():
     """Test top-down implementation system"""
     print("=" * 80)
-    print("MONAD Top-Down Implementation System - Test")
+    print("Eidolon Top-Down Implementation System - Test")
     print("=" * 80)
     print()
 

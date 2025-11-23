@@ -251,7 +251,8 @@ Provide ONLY valid JSON matching the format above. No markdown formatting, no ex
                     }
                 ],
                 max_tokens=4096,
-                temperature=0.0
+                temperature=0.0,
+                response_format={"type": "json_object"},
             )
 
         # Extract JSON from response using improved extraction

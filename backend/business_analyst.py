@@ -400,13 +400,13 @@ class BusinessAnalyst:
             "consult_deployment_specialist": SpecialistDomain.DEPLOYMENT,
             "consult_frontend_specialist": SpecialistDomain.FRONTEND,
             "consult_database_specialist": SpecialistDomain.DATABASE,
-            "consult_api_specialist": SpecialistDomain.API,
-            "consult_data_specialist": SpecialistDomain.DATA,
+            "consult_api_specialist": SpecialistDomain.API_DESIGN,
+            "consult_data_specialist": SpecialistDomain.DATA_ENGINEERING,
             "consult_integration_specialist": SpecialistDomain.INTEGRATION,
             "consult_diagnostic_specialist": SpecialistDomain.DIAGNOSTICS,
             "consult_performance_specialist": SpecialistDomain.PERFORMANCE,
-            "consult_pytorch_engineer": SpecialistDomain.ML_PYTORCH,
-            "consult_ux_specialist": SpecialistDomain.UX
+            "consult_pytorch_engineer": SpecialistDomain.MACHINE_LEARNING,
+            "consult_ux_specialist": SpecialistDomain.UX_DESIGN
         }
 
     async def analyze_request(

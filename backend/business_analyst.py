@@ -37,6 +37,7 @@ from llm_providers import LLMProvider
 from code_graph import CodeGraph
 from design_context_tools import DesignContextToolHandler, DESIGN_CONTEXT_TOOLS
 from specialist_agents import SpecialistRegistry, SpecialistDomain
+from utils.json_utils import extract_json_from_response
 from logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -567,7 +568,6 @@ Use the available tools to explore the codebase before finalizing your analysis.
                 continue
 
             # No tool calls - process as final analysis
-            from utils.json_utils import extract_json_from_response
             analysis_result = extract_json_from_response(response.content)
 
             if analysis_result and "refined_requirements" in analysis_result:
@@ -989,7 +989,6 @@ Is this correct? (yes/no/corrections)"""
                     # Try to extract final analysis from response
                     if response.content:
                         try:
-                            from utils.json_utils import extract_json_from_response
                             extracted = extract_json_from_response(response.content)
                             if extracted and "refined_requirements" in extracted:
                                 analysis_result = extracted

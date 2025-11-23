@@ -1,15 +1,17 @@
 """
-Full Pipeline Orchestrator - Phase 3C
+Full Pipeline Orchestrator - Phase 4
 
 Orchestrates the complete hierarchical decomposition and implementation pipeline:
 
+0. CodeGraphAnalyzer: Parse project and build dependency graphs (Phase 4)
 1. SystemDecomposer: User request → Subsystem tasks
 2. SubsystemDecomposer: Subsystem tasks → Module tasks
 3. ModuleDecomposer: Module tasks → Function/Class tasks
-4. FunctionPlanner: Function/Class tasks → Code
+4. FunctionPlanner: Function/Class tasks → Code (with graph context!)
 5. File Writer: Code → Disk
 
 Features:
+- Phase 4: Code graph analysis provides rich context
 - Review loops enabled at all tiers
 - Dependency resolution and ordering
 - Progress tracking and state management
@@ -35,6 +37,7 @@ from planning.decomposition import (
     ClassDecomposer,
     FunctionPlanner
 )
+from code_graph import CodeGraphAnalyzer, CodeGraph
 from logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -74,6 +77,9 @@ class OrchestrationResult:
     # Task tree for inspection
     task_tree: Dict[str, Any] = field(default_factory=dict)
 
+    # Phase 4: Code graph
+    code_graph: Optional[CodeGraph] = None
+
 
 class HierarchicalOrchestrator:
     """
@@ -89,7 +95,9 @@ class HierarchicalOrchestrator:
         review_min_score: float = 60.0,  # Lower threshold based on performance analysis
         review_max_iterations: int = 2,
         max_concurrent_tasks: int = 3,
-        create_backups: bool = True
+        create_backups: bool = True,
+        use_code_graph: bool = True,  # Phase 4: Enable code graph analysis
+        generate_ai_descriptions: bool = False  # Optional AI descriptions for UX
     ):
         """
         Initialize the orchestrator
@@ -101,6 +109,8 @@ class HierarchicalOrchestrator:
             review_max_iterations: Max revision iterations per task
             max_concurrent_tasks: Max tasks to process in parallel
             create_backups: Create backups before overwriting files
+            use_code_graph: Enable code graph analysis for context (Phase 4)
+            generate_ai_descriptions: Generate AI descriptions for functions/classes
         """
         self.llm_provider = llm_provider
         self.use_review_loops = use_review_loops
@@ -108,6 +118,14 @@ class HierarchicalOrchestrator:
         self.review_max_iterations = review_max_iterations
         self.max_concurrent_tasks = max_concurrent_tasks
         self.create_backups = create_backups
+        self.use_code_graph = use_code_graph
+        self.generate_ai_descriptions = generate_ai_descriptions
+
+        # Phase 4: Initialize code graph analyzer
+        self.code_graph_analyzer = CodeGraphAnalyzer(
+            llm_provider=llm_provider if generate_ai_descriptions else None,
+            generate_ai_descriptions=generate_ai_descriptions
+        ) if use_code_graph else None
 
         # Initialize all decomposers with review loops
         self.system_decomposer = SystemDecomposer(
@@ -205,6 +223,34 @@ class HierarchicalOrchestrator:
             if existing_subsystems is None:
                 existing_subsystems = self._detect_subsystems(project_dir)
                 logger.info("subsystems_detected", subsystems=existing_subsystems)
+
+            # ================================================================
+            # TIER 0: Code Graph Analysis (Phase 4)
+            # ================================================================
+            code_graph = None
+            if self.use_code_graph and self.code_graph_analyzer:
+                logger.info("tier0_starting", tier="code_graph_analysis")
+                try:
+                    code_graph = await self.code_graph_analyzer.analyze_project(
+                        project_path=project_dir,
+                        exclude_patterns=["test_*", "*_test.py", ".*", "__pycache__", "venv", "env"]
+                    )
+                    result.code_graph = code_graph
+
+                    logger.info(
+                        "tier0_complete",
+                        modules=code_graph.total_modules,
+                        functions=code_graph.total_functions,
+                        classes=code_graph.total_classes,
+                        lines=code_graph.total_lines
+                    )
+
+                    # Add code graph to context for all decomposers
+                    context["code_graph"] = code_graph
+
+                except Exception as e:
+                    logger.warning("code_graph_analysis_failed", error=str(e))
+                    # Continue without code graph - graceful degradation
 
             # ================================================================
             # TIER 1: System Decomposition (User Request → Subsystem Tasks)
@@ -453,8 +499,47 @@ class HierarchicalOrchestrator:
         )
 
         # ================================================================
-        # TIER 4: Generate Code
+        # TIER 4: Generate Code (with Code Graph Context - Phase 4)
         # ================================================================
+
+        # Enrich context with code graph information if available
+        if "code_graph" in context and context["code_graph"]:
+            code_graph = context["code_graph"]
+
+            # Try to extract function ID from task target
+            # Format: "module.py::function_name" or "module.py::Class::method"
+            function_id = None
+            if "::" in code_task.target:
+                # Convert file path to module path for graph lookup
+                parts = code_task.target.split("::")
+                if len(parts) >= 2:
+                    # Build function ID for graph lookup
+                    module_part = parts[0].replace("/", "/").replace(".py", "")
+                    func_part = "::".join(parts[1:])
+                    function_id = f"{module_part}::{func_part}"
+
+            # Get rich context if we found the function
+            if function_id:
+                rich_context = self.code_graph_analyzer.get_context_for_function(
+                    function_id=function_id,
+                    graph=code_graph,
+                    max_depth=2
+                )
+
+                if rich_context:
+                    # Add to task context
+                    if not hasattr(code_task, 'context') or code_task.context is None:
+                        code_task.context = {}
+
+                    code_task.context["rich_context"] = rich_context
+
+                    logger.info(
+                        "code_graph_context_added",
+                        function=function_id,
+                        callers=len(rich_context.get("callers", [])),
+                        callees=len(rich_context.get("callees", [])),
+                        related_classes=len(rich_context.get("related_classes", []))
+                    )
 
         code_result = await self.function_planner.generate_implementation(code_task)
 

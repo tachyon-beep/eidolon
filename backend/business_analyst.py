@@ -513,8 +513,7 @@ Use the available tools to explore the codebase before finalizing your analysis.
                 if use_tools:
                     call_params["tools"] = DESIGN_CONTEXT_TOOLS
                     call_params["tool_choice"] = "auto"
-                else:
-                    call_params["response_format"] = {"type": "json_object"}
+                # Note: Claude follows JSON prompts well without response_format
 
                 response = await self.llm_provider.create_completion(**call_params)
 

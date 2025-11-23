@@ -234,8 +234,7 @@ class SystemDecomposer:
                     from design_context_tools import DESIGN_CONTEXT_TOOLS
                     call_params["tools"] = DESIGN_CONTEXT_TOOLS
                     call_params["tool_choice"] = "auto"
-                else:
-                    call_params["response_format"] = {"type": "json_object"}
+                # Note: Claude follows JSON prompts well without response_format
 
                 response = await self.llm_provider.create_completion(**call_params)
 
@@ -598,8 +597,7 @@ class SubsystemDecomposer:
                     from design_context_tools import DESIGN_CONTEXT_TOOLS
                     call_params["tools"] = DESIGN_CONTEXT_TOOLS
                     call_params["tool_choice"] = "auto"
-                else:
-                    call_params["response_format"] = {"type": "json_object"}
+                # Note: Claude follows JSON prompts well without response_format
 
                 response = await self.llm_provider.create_completion(**call_params)
 
@@ -953,9 +951,7 @@ class ModuleDecomposer:
                     from design_context_tools import DESIGN_CONTEXT_TOOLS
                     call_params["tools"] = DESIGN_CONTEXT_TOOLS
                     call_params["tool_choice"] = "auto"
-                else:
-                    # Phase 2.5: Structured output
-                    call_params["response_format"] = {"type": "json_object"}
+                # Note: Claude follows JSON prompts well without response_format
 
                 response = await self.llm_provider.create_completion(**call_params)
 
@@ -1303,12 +1299,12 @@ class ClassDecomposer:
                     {"role": "user", "content": prompts["user"]}
                 ],
                 max_tokens=2048,
-                temperature=0.0,
-                response_format={"type": "json_object"}  # Structured output
+                temperature=0.0
+                # Note: Claude follows JSON prompts well without response_format
             )
         except (TypeError, Exception) as e:
-            # Fallback if response_format not supported
-            logger.warning(f"Structured output not supported: {e}, using regular mode")
+            # Fallback if create_completion fails
+            logger.warning(f"LLM call failed: {e}, using regular mode")
             response = await self.llm_provider.create_completion(
                 messages=[
                     {"role": "system", "content": prompts["system"]},
@@ -1595,9 +1591,7 @@ class FunctionPlanner:
                     from code_context_tools import CODE_CONTEXT_TOOLS
                     call_params["tools"] = CODE_CONTEXT_TOOLS
                     call_params["tool_choice"] = "auto"
-                else:
-                    # Phase 2.5: Structured output
-                    call_params["response_format"] = {"type": "json_object"}
+                # Note: Claude follows JSON prompts well without response_format
 
                 response = await self.llm_provider.create_completion(**call_params)
 

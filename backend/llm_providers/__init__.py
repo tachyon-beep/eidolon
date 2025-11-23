@@ -234,6 +234,15 @@ class OpenAICompatibleProvider(LLMProvider):
         **kwargs
     ) -> LLMResponse:
         """Create completion using OpenAI-compatible API"""
+
+        # Add OpenRouter-specific headers if using OpenRouter
+        if self.provider_name == "openrouter":
+            if "extra_headers" not in kwargs:
+                kwargs["extra_headers"] = {
+                    "HTTP-Referer": "https://github.com/studious-adventure",
+                    "X-Title": "Studious Adventure Code Generator"
+                }
+
         response = await self.client.chat.completions.create(
             model=self.model,
             messages=messages,

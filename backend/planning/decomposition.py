@@ -257,11 +257,18 @@ class SystemDecomposer:
                     turn=turn
                 )
 
-                messages.append({
-                    "role": "assistant",
-                    "content": response.content or "",
-                    "tool_calls": tool_calls
-                })
+                # Use the properly formatted message from the raw response
+                # This ensures tool_calls are correctly serialized for the API
+                if hasattr(response, 'raw_response') and response.raw_response:
+                    assistant_message = response.raw_response.choices[0].message
+                    messages.append(assistant_message)
+                else:
+                    # Fallback for providers without raw_response
+                    messages.append({
+                        "role": "assistant",
+                        "content": response.content or "",
+                        "tool_calls": tool_calls
+                    })
 
                 for tool_call in tool_calls:
                     tool_name = tool_call.function.name
@@ -620,11 +627,17 @@ class SubsystemDecomposer:
                     turn=turn
                 )
 
-                messages.append({
-                    "role": "assistant",
-                    "content": response.content or "",
-                    "tool_calls": tool_calls
-                })
+                # Use the properly formatted message from the raw response
+                if hasattr(response, 'raw_response') and response.raw_response:
+                    assistant_message = response.raw_response.choices[0].message
+                    messages.append(assistant_message)
+                else:
+                    # Fallback for providers without raw_response
+                    messages.append({
+                        "role": "assistant",
+                        "content": response.content or "",
+                        "tool_calls": tool_calls
+                    })
 
                 for tool_call in tool_calls:
                     tool_name = tool_call.function.name
@@ -977,11 +990,17 @@ class ModuleDecomposer:
                 )
 
                 # Add assistant's message with tool calls to conversation
-                messages.append({
-                    "role": "assistant",
-                    "content": response.content or "",
-                    "tool_calls": tool_calls
-                })
+                # Use the properly formatted message from the raw response
+                if hasattr(response, 'raw_response') and response.raw_response:
+                    assistant_message = response.raw_response.choices[0].message
+                    messages.append(assistant_message)
+                else:
+                    # Fallback for providers without raw_response
+                    messages.append({
+                        "role": "assistant",
+                        "content": response.content or "",
+                        "tool_calls": tool_calls
+                    })
 
                 # Execute each tool call
                 for tool_call in tool_calls:
@@ -1617,11 +1636,17 @@ class FunctionPlanner:
                 )
 
                 # Add assistant's message with tool calls to conversation
-                messages.append({
-                    "role": "assistant",
-                    "content": response.content or "",
-                    "tool_calls": tool_calls
-                })
+                # Use the properly formatted message from the raw response
+                if hasattr(response, 'raw_response') and response.raw_response:
+                    assistant_message = response.raw_response.choices[0].message
+                    messages.append(assistant_message)
+                else:
+                    # Fallback for providers without raw_response
+                    messages.append({
+                        "role": "assistant",
+                        "content": response.content or "",
+                        "tool_calls": tool_calls
+                    })
 
                 # Execute each tool call
                 for tool_call in tool_calls:

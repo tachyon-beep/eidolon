@@ -1,172 +1,93 @@
-# MONAD — Hierarchical Agent System
+# Eidolon — Hierarchical Agent System
 
-**"Recursive unity made manifest."**
+Eidolon is a hierarchical code analysis and planning system. Agents operate at system, module, class, and function levels to review code, propose changes, and synthesize findings into actionable cards.
 
-MONAD is a hierarchical intelligence system where agents analyze code at multiple levels (system → module → function), with insights flowing upward to create unified meta-perspectives.
+## What’s Inside
 
-## Architecture
+- **Backend (Python, FastAPI)** under `src/eidolon/`: agent orchestrators, planners, business analyst, code graph/context tools, caching, storage, resilience, metrics, API routes.
+- **Frontend (Vue 3 + Vite)** under `frontend/`: UI for running analyses and viewing cards.
+- **Docs** under `docs/`: architecture notes, historical test results, and archived reports (see `docs/ARCHIVE_NOTES.md`).
+- **Tests** under `tests/`: extensive unit/integration coverage; LLM-gated integration tests live in `tests/integration` and skip when no API key. Legacy root `test_*.py` scripts are preserved in `legacy_tests/`.
 
-### Core Concepts
+## Getting Started (Backend)
 
-- **Cards**: Every work item is a card. Cards can be broken down and routed between different system tabs.
-- **Hierarchical Agents**: Agents deploy at system, module, and function levels, each analyzing their scope and reporting upward.
-- **Six Domains**: Explore, Code, Repair, Test, Plan, Design (MVP implements Explore, Code, Plan)
+1) Install deps with uv (Python 3.10+):
 
-### MVP Features
-
-- ✅ Card-based work tracking system
-- ✅ 3-level agent hierarchy (System → Module → Function)
-- ✅ Code analysis with AST and pattern detection
-- ✅ Agent inspection ("snoop" view)
-- ✅ Card routing between tabs
-- ✅ Real-time updates via WebSocket
-- ✅ Vue 3 frontend with clean UX
-
-## Project Structure
-
-```
-monad/
-├── backend/              # FastAPI backend
-│   ├── models/          # Data models (cards, agents)
-│   ├── agents/          # Agent orchestration and hierarchy
-│   ├── analysis/        # Code analysis tools
-│   ├── api/             # REST and WebSocket endpoints
-│   └── storage/         # SQLite database layer
-├── frontend/            # Vue 3 frontend
-│   ├── src/
-│   │   ├── components/  # Vue components
-│   │   ├── views/       # Tab views
-│   │   └── stores/      # State management
-│   └── public/
-├── examples/            # Sample code for analysis
-└── docs/               # Documentation
+```bash
+uv sync
 ```
 
-## Quick Start
+2) Run API:
 
-### Prerequisites
-
-- Python 3.9+
-- Node.js 16+
-- Anthropic API key ([Get one here](https://console.anthropic.com/))
-
-### Backend Setup
-
-1. **Navigate to backend directory:**
-   ```bash
-   cd backend
-   ```
-
-2. **Create and activate virtual environment:**
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # Linux/Mac
-   # or
-   venv\Scripts\activate  # Windows
-   ```
-
-3. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Set your API key:**
-   ```bash
-   export ANTHROPIC_API_KEY=your_key_here  # Linux/Mac
-   # or
-   set ANTHROPIC_API_KEY=your_key_here  # Windows
-   ```
-
-5. **Run the server:**
-   ```bash
-   python main.py
-   ```
-
-   Backend runs on `http://localhost:8000`
-
-### Frontend Setup
-
-1. **Open a new terminal and navigate to frontend:**
-   ```bash
-   cd frontend
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   npm install
-   ```
-
-3. **Run the development server:**
-   ```bash
-   npm run dev
-   ```
-
-   Frontend runs on `http://localhost:5173`
-
-### Try It Out
-
-1. Open your browser to `http://localhost:5173`
-2. In the **Explore** tab, enter `../examples` as the analysis path
-3. Click **Analyze** to deploy the hierarchical agent mesh
-4. Watch as agents analyze the code at different levels (System → Module → Function)
-5. View the generated cards showing bugs, code smells, and improvement opportunities
-6. Click any card to see details and open the **Agent Snoop** tab to inspect the agent's reasoning
-7. Drag cards to different tabs using the left dock icons
-
-## Usage
-
-1. **Explore Tab**: Upload or point to a codebase. Click "Analyze" to deploy the agent hierarchy.
-2. **View Cards**: Each analysis produces cards showing issues, enhancements, and code smells.
-3. **Inspect Agents**: Click any agent card to open the "snoop" view and see its reasoning.
-4. **Route Cards**: Drag cards to other tabs or use the route button to move work items.
-
-## Card Types
-
-- **Review** (Explore): Code audit findings
-- **Change** (Code): Proposed code changes
-- **Architecture** (Plan): System design decisions
-- **Test** (Test): Test requirements
-- **Defect** (Repair): Bug reports
-- **Requirement** (Design): Product requirements
-
-## Agent Hierarchy
-
-```
-SystemAgent
-  ├─> ModuleAgent (per .py file)
-  │     ├─> FunctionAgent (per function/class)
-  │     └─> FunctionAgent
-  └─> ModuleAgent
-        └─> FunctionAgent
+```bash
+uv run uvicorn eidolon.main:app --reload
 ```
 
-## Development Roadmap
+3) Env vars for LLM providers:
 
-### MVP (Current)
-- [x] Core card system
-- [x] 3-level agent hierarchy
-- [x] Basic code analysis
-- [x] Explore, Code, Plan tabs
-- [x] Agent inspection
+- `OPENAI_API_KEY` or `OPENROUTER_API_KEY`
+- `OPENAI_BASE_URL` (default `https://openrouter.ai/api/v1`)
+- `OPENAI_MODEL` (default `gpt-4o-mini`)
 
-### Phase 2
-- [ ] Repair tab with bug triage
-- [ ] Test tab with TDD guardians
-- [ ] Design tab with requirements chat
-- [ ] Advanced contestability system
-- [ ] Risk and confidence scoring
+4) Run tests:
 
-### Phase 3
-- [ ] Multi-language support
-- [ ] Integration with CI/CD
-- [ ] Team collaboration features
-- [ ] Historical analysis and trends
+```bash
+uv run pytest tests          # unit + non-LLM integration
+uv run pytest tests -m "llm" # LLM-gated integration (requires key)
+```
 
-## Philosophy
+## Getting Started (Frontend)
 
-> *In Leibniz's Monadology, every monad reflects the entire universe from its perspective — exactly like this design, where each agent reflects the system through its analytical scope.*
+```bash
+cd frontend
+npm install
+npm run dev   # http://localhost:5173
+```
 
-Every agent is a microcosm of the whole, performing analysis, self-reflection, and synthesis, reporting upward until the system forms a unified meta-perspective.
+## Repository Layout
+
+```
+src/eidolon/
+  agents/                # Agent orchestrators
+  analysis/, code_graph.py, code_context_tools.py, design_context_tools.py
+  planning/              # Decomposition, prompts, review loop
+  business_analyst.py    # Requirements refinement
+  linting_agent.py, specialist_agents.py
+  test_generator.py, code_writer.py
+  api/routes.py          # FastAPI routes
+  storage/database.py    # SQLite persistence
+  cache/cache_manager.py # Analysis result cache
+  resilience/            # retry/timeout/rate limiter
+  metrics/, health/      # Prometheus + health probes
+frontend/                # Vue 3 UI
+docs/                    # Architecture + archived reports
+legacy_tests/            # Historical integration scripts (not collected)
+```
+
+## Key Features
+
+- Hierarchical analysis (system → module → class → function) with card generation.
+- Business Analyst layer for requirements refinement and subsystem targeting.
+- Structured planning prompts, review loops, and specialist agents (security, testing, etc.).
+- Cache, retry/timeout, circuit breaker, rate limiter, and metrics/health endpoints.
+- Integration tests for API, git diff parsing, orchestrator cache/progress, BA/LLM paths.
+
+## Integration Tests
+
+- Standard suite: `uv run pytest tests`
+- LLM-backed suite: `uv run pytest tests -m "llm"` (skips without key)
+- Legacy root scripts retained in `legacy_tests/` for reference.
+
+## Documentation Highlights
+
+- Current docs: `docs/ARCHITECTURE.md`, `docs/MVP_SUMMARY.md`, `docs/ARCHIVE_NOTES.md`.
+- Archived reports: reliability analyses, prompt engineering, phase test results, and design notes live in `docs/` (see `docs/ARCHIVE_NOTES.md` for the full list).
+
+## Environment
+
+- LLMs: OpenAI-compatible (`OpenAICompatibleProvider`) with OpenRouter/OpenAI; Anthropic optional if configured.
+- Database: SQLite created at runtime; file caching optional.
+- Metrics: Prometheus at `/metrics`; health probes at `/health`, `/health/ready`, `/health/live`.
 
 ## License
 

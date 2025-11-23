@@ -1,8 +1,8 @@
-# MONAD MVP - Implementation Summary
+# Eidolon MVP - Implementation Summary
 
 ## What Was Built
 
-A complete MVP of the MONAD hierarchical agent system that demonstrates the core concept: AI agents analyzing code at multiple levels (System → Module → Function) with findings flowing upward to create a unified system perspective.
+A complete MVP of the Eidolon hierarchical agent system that demonstrates the core concept: AI agents analyzing code at multiple levels (System → Module → Function) with findings flowing upward to create a unified system perspective.
 
 ## Key Accomplishments
 
@@ -121,7 +121,7 @@ A complete MVP of the MONAD hierarchical agent system that demonstrates the core
 ## File Structure
 
 ```
-monad/
+eidolon/
 ├── backend/
 │   ├── models/          # Data models (Card, Agent)
 │   ├── agents/          # Orchestration logic
@@ -301,8 +301,8 @@ The MVP successfully demonstrates:
 
 ## Conclusion
 
-This MVP proves the MONAD concept is viable and valuable. The hierarchical agent system successfully analyzes code at multiple levels, synthesizes findings upward, and presents them through an intuitive card-based interface with full transparency into agent reasoning.
+This MVP proves the Eidolon concept is viable and valuable. The hierarchical agent system successfully analyzes code at multiple levels, synthesizes findings upward, and presents them through an intuitive card-based interface with full transparency into agent reasoning.
 
 The foundation is solid for building out the remaining tabs (Repair, Test, Design) and adding advanced features like contestability, multi-language support, and team collaboration.
 
-**MONAD is ready for demonstration and user testing.**
+**Eidolon is ready for demonstration and user testing.**

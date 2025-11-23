@@ -3,7 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MONAD - Recursive Unity Made Manifest</title>
+  <title>Eidolon - Recursive Unity Made Manifest</title>
+
+  <!-- Google Fonts: JetBrains Mono & Inter Variable -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300..800&family=JetBrains+Mono:wght@400..800&display=swap" rel="stylesheet">
+
   <style>
     * {
       margin: 0;
@@ -11,10 +17,107 @@
       box-sizing: border-box;
     }
 
+    :root {
+      /* Color Palette */
+      --deep-space: #0d0d1e;
+      --dark-layer: #1a1a2e;
+      --card-surface: #1e1e34;
+
+      --amber-primary: #f59e0b;
+      --amber-bright: #fbbf24;
+      --amber-glow: rgba(245, 158, 11, 0.15);
+
+      --electric-blue: #3b82f6;
+      --electric-glow: rgba(59, 130, 246, 0.15);
+
+      --purple-soft: #a78bfa;
+      --purple-glow: rgba(167, 139, 250, 0.12);
+
+      --cyan-active: #06b6d4;
+      --cyan-glow: rgba(6, 182, 212, 0.2);
+
+      --coral-danger: #f87171;
+
+      --text-primary: #e8e8f0;
+      --text-secondary: #a0a0b8;
+      --text-muted: #6b6b82;
+
+      /* Typography */
+      --font-display: 'JetBrains Mono', monospace;
+      --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-      background: #0a0a0a;
-      color: #e0e0e0;
+      font-family: var(--font-body);
+      background: var(--deep-space);
+      color: var(--text-primary);
+      overflow-x: hidden;
+      position: relative;
+    }
+
+    /* Animated gradient mesh background */
+    body::before {
+      content: '';
+      position: fixed;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background:
+        radial-gradient(circle at 20% 30%, var(--purple-glow) 0%, transparent 50%),
+        radial-gradient(circle at 80% 20%, var(--electric-glow) 0%, transparent 50%),
+        radial-gradient(circle at 40% 80%, var(--amber-glow) 0%, transparent 50%),
+        radial-gradient(circle at 90% 70%, var(--cyan-glow) 0%, transparent 50%);
+      animation: meshMove 20s ease-in-out infinite alternate;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    /* Noise texture overlay */
+    body::after {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+      z-index: 1;
+      pointer-events: none;
+      opacity: 0.4;
+    }
+
+    @keyframes meshMove {
+      0% {
+        transform: translate(0, 0) rotate(0deg);
+      }
+      100% {
+        transform: translate(10%, 10%) rotate(5deg);
+      }
+    }
+
+    #app {
+      position: relative;
+      z-index: 2;
+    }
+
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: var(--deep-space);
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--card-surface);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--purple-soft);
     }
   </style>
 </head>

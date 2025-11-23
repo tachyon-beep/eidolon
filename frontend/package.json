@@ -1,7 +1,7 @@
 {
-  "name": "monad-frontend",
+  "name": "eidolon-frontend",
   "version": "0.1.0",
-  "description": "MONAD - Hierarchical Agent System UI",
+  "description": "Eidolon - Hierarchical AI Agent System UI",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -76,80 +76,146 @@ const handleClick = () => {
 
 <style scoped>
 .card-tile {
-  background: #1a1a1a;
-  border: 1px solid #2a2a2a;
-  border-radius: 8px;
-  padding: 16px;
+  background: rgba(30, 30, 52, 0.5);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(167, 139, 250, 0.15);
+  border-radius: 16px;
+  padding: 20px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.card-tile::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--amber-primary), transparent);
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+
+.card-tile:hover::before {
+  opacity: 1;
+}
+
+.card-tile::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+    rgba(245, 158, 11, 0.08) 0%,
+    transparent 50%
+  );
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+}
+
+.card-tile:hover::after {
+  opacity: 1;
 }
 
 .card-tile:hover {
-  border-color: #00d4aa;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  border-color: var(--amber-primary);
+  transform: translateY(-4px);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.4),
+    0 0 20px var(--amber-glow);
 }
 
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
+  position: relative;
+  z-index: 1;
 }
 
 .card-type {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 4px 8px;
-  border-radius: 4px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: 8px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 1px;
+  border: 1px solid;
 }
 
 .type-review .card-type {
-  background: #1a3a4a;
-  color: #5dade2;
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--electric-blue);
+  border-color: rgba(59, 130, 246, 0.3);
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.2);
 }
 
 .type-change .card-type {
-  background: #3a2a1a;
-  color: #e59d5d;
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--amber-bright);
+  border-color: rgba(245, 158, 11, 0.3);
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.2);
 }
 
 .type-architecture .card-type {
-  background: #2a1a3a;
-  color: #a95de5;
+  background: rgba(167, 139, 250, 0.15);
+  color: var(--purple-soft);
+  border-color: rgba(167, 139, 250, 0.3);
+  box-shadow: 0 0 12px rgba(167, 139, 250, 0.2);
 }
 
 .card-priority {
-  font-size: 10px;
-  font-weight: 600;
-  padding: 2px 6px;
-  border-radius: 3px;
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid;
 }
 
 .priority-p0 {
-  background: #4a1a1a;
-  color: #e55d5d;
+  background: rgba(248, 113, 113, 0.15);
+  color: var(--coral-danger);
+  border-color: rgba(248, 113, 113, 0.4);
+  animation: priorityPulse 2s ease-in-out infinite;
+}
+
+@keyframes priorityPulse {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(248, 113, 113, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(248, 113, 113, 0.5);
+  }
 }
 
 .priority-p1 {
-  background: #4a3a1a;
-  color: #e5a55d;
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--amber-primary);
+  border-color: rgba(245, 158, 11, 0.3);
 }
 
 .priority-p2,
 .priority-p3 {
-  background: #2a2a2a;
-  color: #888;
+  background: rgba(107, 107, 130, 0.1);
+  color: var(--text-muted);
+  border-color: rgba(107, 107, 130, 0.2);
 }
 
 .card-title {
-  font-size: 14px;
-  font-weight: 500;
-  color: #e0e0e0;
-  margin-bottom: 12px;
-  line-height: 1.4;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 14px;
+  line-height: 1.5;
+  position: relative;
+  z-index: 1;
 }
 
 .card-meta {
@@ -157,63 +223,93 @@ const handleClick = () => {
   justify-content: space-between;
   align-items: center;
   font-size: 11px;
-  color: #666;
-  margin-bottom: 8px;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+  position: relative;
+  z-index: 1;
 }
 
 .card-id {
-  font-family: monospace;
+  font-family: var(--font-display);
+  font-size: 10px;
+  padding: 4px 8px;
+  background: rgba(167, 139, 250, 0.08);
+  border: 1px solid rgba(167, 139, 250, 0.15);
+  border-radius: 6px;
+  color: var(--purple-soft);
 }
 
 .card-status {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  font-weight: 500;
+  color: var(--text-secondary);
 }
 
 .card-owner {
-  margin-top: 8px;
+  margin-top: 10px;
+  position: relative;
+  z-index: 1;
 }
 
 .agent-badge {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-display);
   font-size: 10px;
-  padding: 4px 8px;
-  background: #0a2a2a;
-  color: #00d4aa;
-  border-radius: 4px;
-  font-family: monospace;
+  font-weight: 600;
+  padding: 6px 10px;
+  background: rgba(6, 182, 212, 0.12);
+  border: 1px solid rgba(6, 182, 212, 0.25);
+  color: var(--cyan-active);
+  border-radius: 8px;
+}
+
+.agent-badge::before {
+  content: '◎';
+  font-size: 11px;
+  opacity: 0.7;
 }
 
 .card-metrics {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid #2a2a2a;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(167, 139, 250, 0.12);
+  position: relative;
+  z-index: 1;
 }
 
 .metric {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   font-size: 11px;
 }
 
 .metric-label {
-  color: #888;
-  min-width: 70px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  min-width: 80px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .metric-bar {
   flex: 1;
-  height: 4px;
-  background: #2a2a2a;
-  border-radius: 2px;
+  height: 6px;
+  background: rgba(107, 107, 130, 0.15);
+  border-radius: 3px;
   overflow: hidden;
+  border: 1px solid rgba(167, 139, 250, 0.1);
 }
 
 .metric-fill {
   height: 100%;
-  background: #00d4aa;
-  transition: width 0.3s;
+  background: linear-gradient(90deg, var(--cyan-active), var(--electric-blue));
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 8px var(--cyan-glow);
 }
 </style>

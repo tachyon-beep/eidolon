@@ -67,19 +67,32 @@ onUnmounted(() => {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #0a0a0a;
-  color: #e0e0e0;
+  background: transparent;
+  color: var(--text-primary);
 }
 
 .main-layout {
   flex: 1;
   display: flex;
   overflow: hidden;
+  position: relative;
 }
 
 .content {
   flex: 1;
   overflow-y: auto;
-  padding: 20px;
+  padding: 32px 40px;
+  animation: fadeIn 0.6s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 </style>

@@ -1,8 +1,8 @@
-# MONAD Architecture
+# Eidolon Architecture
 
 ## Overview
 
-MONAD implements a hierarchical agent system where AI agents analyze code at multiple abstraction levels, with findings flowing upward to create a unified system-level perspective.
+Eidolon implements a hierarchical agent system where AI agents analyze code at multiple abstraction levels, with findings flowing upward to create a unified system-level perspective.
 
 ## Core Principles
 
@@ -149,7 +149,7 @@ Every agent exposes:
 
 ```json
 {
-  "id": "MONAD-2024-REV-0001",
+  "id": "Eidolon-2024-REV-0001",
   "type": "Review|Change|Architecture|Test|Defect|Requirement",
   "title": "string",
   "summary": "markdown",

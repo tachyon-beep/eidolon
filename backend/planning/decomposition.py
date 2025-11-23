@@ -37,10 +37,11 @@ class SystemDecomposer:
         use_intelligent_selection: bool = True,
         use_review_loop: bool = True,
         review_min_score: float = 75.0,
-        review_max_iterations: int = 2
+        review_max_iterations: int = 2,
+        design_tool_handler: Optional[Any] = None
     ):
         """
-        Initialize SystemDecomposer with Phase 2.5 and Phase 3 improvements
+        Initialize SystemDecomposer with Phase 2.5, Phase 3, and Phase 4C improvements
 
         Args:
             llm_provider: LLM provider for making API calls
@@ -48,6 +49,7 @@ class SystemDecomposer:
             use_review_loop: Whether to use review-and-revise loops (Phase 3, default: True)
             review_min_score: Minimum acceptable quality score for review (0-100, default: 75.0)
             review_max_iterations: Maximum revision attempts (default: 2)
+            design_tool_handler: Optional DesignContextToolHandler for interactive design (Phase 4C)
         """
         self.llm_provider = llm_provider
         self.use_intelligent_selection = use_intelligent_selection
@@ -64,6 +66,9 @@ class SystemDecomposer:
             self.review_loop = ReviewLoop(llm_provider)
         else:
             self.review_loop = None
+
+        # Phase 4C: Interactive design with tool calling
+        self.design_tool_handler = design_tool_handler
 
     async def decompose(
         self,
@@ -189,32 +194,109 @@ class SystemDecomposer:
         if is_revision and revision_feedback:
             prompts["user"] += f"\n\n---\n**REVISION REQUEST**\n\nYour previous decomposition received the following review feedback. Please revise to address these issues:\n\n{revision_feedback}\n\nProvide an improved decomposition that addresses all the feedback."
 
-        # Phase 2.5 Step 3: Call LLM with structured output support
-        try:
-            # Try to use JSON mode if supported (OpenAI, Anthropic, some providers)
-            response = await self.llm_provider.create_completion(
-                messages=[
-                    {"role": "system", "content": prompts["system"]},
-                    {"role": "user", "content": prompts["user"]}
-                ],
-                max_tokens=4096,
-                temperature=0.0,
-                response_format={"type": "json_object"}  # Structured output
-            )
-        except (TypeError, Exception) as e:
-            # Fallback if response_format not supported
-            logger.warning(f"Structured output not supported: {e}, using regular mode")
-            response = await self.llm_provider.create_completion(
-                messages=[
-                    {"role": "system", "content": prompts["system"]},
-                    {"role": "user", "content": prompts["user"]}
-                ],
-                max_tokens=4096,
-                temperature=0.0
-            )
+        # Phase 4C: Add design exploration guidance if tools available
+        if self.design_tool_handler and not is_revision:
+            prompts["user"] += f"\n\n**Interactive Design Tools Available:**\n"
+            prompts["user"] += f"Explore before finalizing system architecture:\n"
+            prompts["user"] += f"- get_existing_modules: See all existing modules\n"
+            prompts["user"] += f"- get_subsystem_architecture: Understand subsystem structures\n"
+            prompts["user"] += f"- search_similar_modules: Find related functionality\n"
+            prompts["user"] += f"- propose_design_option: Propose and get feedback on architecture\n"
+            prompts["user"] += f"- request_requirement_clarification: Ask about unclear requirements\n"
+            prompts["user"] += f"- validate_design_decision: Check system-level design choices\n"
 
-        # Phase 2.5 Step 4: Extract JSON with improved parsing
-        plan = extract_json_from_response(response.content)
+        # Phase 2.5 Step 3 + Phase 4C: Call LLM with tool calling support
+        messages = [
+            {"role": "system", "content": prompts["system"]},
+            {"role": "user", "content": prompts["user"]}
+        ]
+
+        # Phase 4C: Multi-turn design conversation
+        max_turns = 6
+        turn = 0
+        plan = None
+
+        # Check if design tools are available
+        use_design_tools = self.design_tool_handler is not None and not is_revision
+
+        while turn < max_turns:
+            turn += 1
+
+            try:
+                call_params = {
+                    "messages": messages,
+                    "max_tokens": 4096,
+                    "temperature": 0.0
+                }
+
+                if use_design_tools:
+                    from design_context_tools import DESIGN_CONTEXT_TOOLS
+                    call_params["tools"] = DESIGN_CONTEXT_TOOLS
+                    call_params["tool_choice"] = "auto"
+                else:
+                    call_params["response_format"] = {"type": "json_object"}
+
+                response = await self.llm_provider.create_completion(**call_params)
+
+            except (TypeError, Exception) as e:
+                logger.warning(f"Advanced features not supported: {e}, using regular mode")
+                response = await self.llm_provider.create_completion(
+                    messages=messages,
+                    max_tokens=4096,
+                    temperature=0.0
+                )
+
+            # Phase 4C: Check if LLM made design tool calls
+            tool_calls = getattr(response, 'tool_calls', None)
+
+            if tool_calls and use_design_tools:
+                logger.info(
+                    "design_tool_calls_requested",
+                    user_request=user_request[:50],
+                    count=len(tool_calls),
+                    turn=turn
+                )
+
+                messages.append({
+                    "role": "assistant",
+                    "content": response.content or "",
+                    "tool_calls": tool_calls
+                })
+
+                for tool_call in tool_calls:
+                    tool_name = tool_call.function.name
+                    tool_args = json.loads(tool_call.function.arguments)
+
+                    logger.info(
+                        "executing_design_tool_call",
+                        tool=tool_name,
+                        args=tool_args
+                    )
+
+                    tool_result = self.design_tool_handler.handle_tool_call(
+                        tool_name=tool_name,
+                        arguments=tool_args
+                    )
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": json.dumps(tool_result)
+                    })
+
+                continue
+
+            # No tool calls - process as final plan response
+            plan = extract_json_from_response(response.content)
+
+            if plan and "subsystem_tasks" in plan:
+                break
+            elif response.content and not tool_calls:
+                logger.warning(f"No valid plan on turn {turn}, continuing...")
+                continue
+            else:
+                logger.warning(f"Empty response on turn {turn}, continuing...")
+                continue
 
         if not plan or "subsystem_tasks" not in plan:
             # Fallback: create a simple task structure
@@ -320,10 +402,11 @@ class SubsystemDecomposer:
         use_intelligent_selection: bool = True,
         use_review_loop: bool = True,
         review_min_score: float = 75.0,
-        review_max_iterations: int = 2
+        review_max_iterations: int = 2,
+        design_tool_handler: Optional[Any] = None
     ):
         """
-        Initialize SubsystemDecomposer with Phase 2.5 and Phase 3 improvements
+        Initialize SubsystemDecomposer with Phase 2.5, Phase 3, and Phase 4C improvements
 
         Args:
             llm_provider: LLM provider for making API calls
@@ -331,6 +414,7 @@ class SubsystemDecomposer:
             use_review_loop: Whether to use review-and-revise loop (default: True)
             review_min_score: Minimum quality score for acceptance (default: 75.0)
             review_max_iterations: Maximum revision iterations (default: 2)
+            design_tool_handler: Optional DesignContextToolHandler for interactive design (Phase 4C)
         """
         self.llm_provider = llm_provider
         self.use_intelligent_selection = use_intelligent_selection
@@ -344,6 +428,9 @@ class SubsystemDecomposer:
         # Phase 3: Review loop for quality improvement
         from planning.review_loop import ReviewLoop
         self.review_loop = ReviewLoop(llm_provider) if use_review_loop else None
+
+        # Phase 4C: Interactive design with tool calling
+        self.design_tool_handler = design_tool_handler
 
     async def decompose(
         self,
@@ -471,31 +558,108 @@ class SubsystemDecomposer:
         if is_revision and revision_feedback:
             prompts["user"] += f"\n\n---\n**REVISION REQUEST**\n\nYour previous decomposition received the following review feedback. Please revise to address these issues:\n\n{revision_feedback}\n\nProvide an improved decomposition that addresses all the feedback."
 
-        # Phase 2.5 Step 3: Call LLM with structured output support
-        try:
-            response = await self.llm_provider.create_completion(
-                messages=[
-                    {"role": "system", "content": prompts["system"]},
-                    {"role": "user", "content": prompts["user"]}
-                ],
-                max_tokens=2048,
-                temperature=0.0,
-                response_format={"type": "json_object"}  # Structured output
-            )
-        except (TypeError, Exception) as e:
-            # Fallback if response_format not supported
-            logger.warning(f"Structured output not supported: {e}, using regular mode")
-            response = await self.llm_provider.create_completion(
-                messages=[
-                    {"role": "system", "content": prompts["system"]},
-                    {"role": "user", "content": prompts["user"]}
-                ],
-                max_tokens=2048,
-                temperature=0.0
-            )
+        # Phase 4C: Add design exploration guidance if tools available
+        if self.design_tool_handler and not is_revision:
+            prompts["user"] += f"\n\n**Interactive Design Tools Available:**\n"
+            prompts["user"] += f"Explore before finalizing subsystem design:\n"
+            prompts["user"] += f"- get_existing_modules: See existing modules in this subsystem\n"
+            prompts["user"] += f"- get_subsystem_architecture: Understand subsystem structure\n"
+            prompts["user"] += f"- search_similar_modules: Find similar subsystems/patterns\n"
+            prompts["user"] += f"- propose_design_option: Propose and get feedback\n"
+            prompts["user"] += f"- validate_design_decision: Check design choices\n"
 
-        # Phase 2.5 Step 4: Extract JSON with improved parsing
-        plan = extract_json_from_response(response.content)
+        # Phase 2.5 Step 3 + Phase 4C: Call LLM with tool calling support
+        messages = [
+            {"role": "system", "content": prompts["system"]},
+            {"role": "user", "content": prompts["user"]}
+        ]
+
+        # Phase 4C: Multi-turn design conversation
+        max_turns = 6
+        turn = 0
+        plan = None
+
+        # Check if design tools are available
+        use_design_tools = self.design_tool_handler is not None and not is_revision
+
+        while turn < max_turns:
+            turn += 1
+
+            try:
+                call_params = {
+                    "messages": messages,
+                    "max_tokens": 2048,
+                    "temperature": 0.0
+                }
+
+                if use_design_tools:
+                    from design_context_tools import DESIGN_CONTEXT_TOOLS
+                    call_params["tools"] = DESIGN_CONTEXT_TOOLS
+                    call_params["tool_choice"] = "auto"
+                else:
+                    call_params["response_format"] = {"type": "json_object"}
+
+                response = await self.llm_provider.create_completion(**call_params)
+
+            except (TypeError, Exception) as e:
+                logger.warning(f"Advanced features not supported: {e}, using regular mode")
+                response = await self.llm_provider.create_completion(
+                    messages=messages,
+                    max_tokens=2048,
+                    temperature=0.0
+                )
+
+            # Phase 4C: Check if LLM made design tool calls
+            tool_calls = getattr(response, 'tool_calls', None)
+
+            if tool_calls and use_design_tools:
+                logger.info(
+                    "design_tool_calls_requested",
+                    subsystem=task.target,
+                    count=len(tool_calls),
+                    turn=turn
+                )
+
+                messages.append({
+                    "role": "assistant",
+                    "content": response.content or "",
+                    "tool_calls": tool_calls
+                })
+
+                for tool_call in tool_calls:
+                    tool_name = tool_call.function.name
+                    tool_args = json.loads(tool_call.function.arguments)
+
+                    logger.info(
+                        "executing_design_tool_call",
+                        tool=tool_name,
+                        args=tool_args
+                    )
+
+                    tool_result = self.design_tool_handler.handle_tool_call(
+                        tool_name=tool_name,
+                        arguments=tool_args
+                    )
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": json.dumps(tool_result)
+                    })
+
+                continue
+
+            # No tool calls - process as final plan response
+            plan = extract_json_from_response(response.content)
+
+            if plan and "module_tasks" in plan:
+                break
+            elif response.content and not tool_calls:
+                logger.warning(f"No valid plan on turn {turn}, continuing...")
+                continue
+            else:
+                logger.warning(f"Empty response on turn {turn}, continuing...")
+                continue
 
         if not plan or "module_tasks" not in plan:
             # Fallback: Use existing modules if available, otherwise create main.py
@@ -523,7 +687,9 @@ class SubsystemDecomposer:
             "subsystem_plan_generated",
             subsystem=task.target,
             modules=len(plan.get("module_tasks", [])),
-            is_revision=is_revision
+            is_revision=is_revision,
+            design_turns_used=turn if use_design_tools else 0,
+            design_tools_enabled=use_design_tools
         )
 
         return plan

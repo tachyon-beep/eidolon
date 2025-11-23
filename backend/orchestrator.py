@@ -40,6 +40,7 @@ from planning.decomposition import (
 from code_graph import CodeGraphAnalyzer, CodeGraph
 from code_context_tools import CodeContextToolHandler
 from design_context_tools import DesignContextToolHandler
+from business_analyst import BusinessAnalyst, RequirementsAnalysis
 from logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -82,6 +83,9 @@ class OrchestrationResult:
     # Phase 4: Code graph
     code_graph: Optional[CodeGraph] = None
 
+    # Phase 5: Requirements analysis
+    requirements_analysis: Optional[RequirementsAnalysis] = None
+
 
 class HierarchicalOrchestrator:
     """
@@ -99,7 +103,8 @@ class HierarchicalOrchestrator:
         max_concurrent_tasks: int = 3,
         create_backups: bool = True,
         use_code_graph: bool = True,  # Phase 4: Enable code graph analysis
-        generate_ai_descriptions: bool = False  # Optional AI descriptions for UX
+        generate_ai_descriptions: bool = False,  # Optional AI descriptions for UX
+        use_business_analyst: bool = True  # Phase 5: Enable requirements analysis
     ):
         """
         Initialize the orchestrator
@@ -113,6 +118,7 @@ class HierarchicalOrchestrator:
             create_backups: Create backups before overwriting files
             use_code_graph: Enable code graph analysis for context (Phase 4)
             generate_ai_descriptions: Generate AI descriptions for functions/classes
+            use_business_analyst: Enable requirements analysis layer (Phase 5)
         """
         self.llm_provider = llm_provider
         self.use_review_loops = use_review_loops
@@ -122,6 +128,7 @@ class HierarchicalOrchestrator:
         self.create_backups = create_backups
         self.use_code_graph = use_code_graph
         self.generate_ai_descriptions = generate_ai_descriptions
+        self.use_business_analyst = use_business_analyst
 
         # Phase 4: Initialize code graph analyzer and tool handler
         self.code_graph_analyzer = CodeGraphAnalyzer(
@@ -137,13 +144,18 @@ class HierarchicalOrchestrator:
         # Will be initialized with code_graph after project analysis
         self.design_tool_handler = None
 
+        # Phase 5: Business Analyst for requirements analysis
+        # Will be initialized with code_graph and design_tool_handler after project analysis
+        self.business_analyst = None
+
         # Initialize all decomposers with review loops
         self.system_decomposer = SystemDecomposer(
             llm_provider=llm_provider,
             use_intelligent_selection=True,
             use_review_loop=use_review_loops,
             review_min_score=review_min_score,
-            review_max_iterations=review_max_iterations
+            review_max_iterations=review_max_iterations,
+            design_tool_handler=None  # Will be set after project analysis
         )
 
         self.subsystem_decomposer = SubsystemDecomposer(
@@ -151,7 +163,8 @@ class HierarchicalOrchestrator:
             use_intelligent_selection=True,
             use_review_loop=use_review_loops,
             review_min_score=review_min_score,
-            review_max_iterations=review_max_iterations
+            review_max_iterations=review_max_iterations,
+            design_tool_handler=None  # Will be set after project analysis
         )
 
         self.module_decomposer = ModuleDecomposer(
@@ -277,14 +290,61 @@ class HierarchicalOrchestrator:
                         design_constraints=context.get("design_constraints")
                     )
 
-                    # Update module decomposer with design tool handler
+                    # Update all decomposers with design tool handler
+                    self.system_decomposer.design_tool_handler = self.design_tool_handler
+                    self.subsystem_decomposer.design_tool_handler = self.design_tool_handler
                     self.module_decomposer.design_tool_handler = self.design_tool_handler
 
                     logger.info("design_tool_handler_initialized", design_tools_available=True)
 
+                    # Phase 5: Initialize Business Analyst for requirements analysis
+                    if self.use_business_analyst:
+                        self.business_analyst = BusinessAnalyst(
+                            llm_provider=self.llm_provider,
+                            code_graph=code_graph,
+                            design_tool_handler=self.design_tool_handler
+                        )
+                        logger.info("business_analyst_initialized", ba_available=True)
+
                 except Exception as e:
                     logger.warning("code_graph_analysis_failed", error=str(e))
                     # Continue without code graph - graceful degradation
+
+            # ================================================================
+            # TIER 0.5: Business Analysis (Phase 5 - Requirements Refinement)
+            # ================================================================
+            # Analyze request and create structured requirements/change plan
+            # before passing to system decomposer
+            requirements_analysis = None
+            refined_request = user_request  # Default to original request
+
+            if self.business_analyst:
+                logger.info("tier0.5_starting", tier="business_analysis")
+                try:
+                    requirements_analysis = await self.business_analyst.analyze_request(
+                        user_request=user_request,
+                        project_path=project_path,
+                        context=context
+                    )
+                    result.requirements_analysis = requirements_analysis
+
+                    # Use refined requirements for system decomposition
+                    refined_request = requirements_analysis.refined_requirements
+
+                    logger.info(
+                        "tier0.5_complete",
+                        change_type=requirements_analysis.change_type,
+                        complexity=requirements_analysis.complexity_estimate,
+                        affected_subsystems=len(requirements_analysis.affected_subsystems),
+                        analysis_turns=requirements_analysis.analysis_turns
+                    )
+
+                    # Add requirements analysis to context for downstream use
+                    context["requirements_analysis"] = requirements_analysis
+
+                except Exception as e:
+                    logger.warning("business_analysis_failed", error=str(e))
+                    # Continue with original request if BA fails
 
             # ================================================================
             # TIER 1: System Decomposition (User Request → Subsystem Tasks)
@@ -292,7 +352,7 @@ class HierarchicalOrchestrator:
             logger.info("tier1_starting", tier="system")
 
             subsystem_tasks = await self.system_decomposer.decompose(
-                user_request=user_request,
+                user_request=refined_request,  # Use refined request from BA
                 project_path=project_path,
                 subsystems=existing_subsystems or ["src"],
                 context=context

@@ -8,6 +8,7 @@ concrete subtasks for the next tier down.
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import uuid
+import json
 
 from models import Task, TaskType, TaskStatus, TaskPriority
 from llm_providers import LLMProvider

@@ -36,6 +36,7 @@ class LLMResponse:
     output_tokens: int
     model: str
     finish_reason: str = "stop"
+    tool_calls: Optional[List[Any]] = None  # Tool calls from LLM
     raw_response: Optional[Any] = None
 
 
@@ -121,12 +122,19 @@ class AnthropicProvider(LLMProvider):
             **kwargs
         )
 
+        # Extract tool calls if present (Anthropic format)
+        tool_calls = None
+        # Note: Anthropic uses a different format for tool use
+        # We would need to extract from response.content if tool_use blocks exist
+        # For now, we'll rely on raw_response for Anthropic tool calls
+
         return LLMResponse(
-            content=response.content[0].text,
+            content=response.content[0].text if response.content and hasattr(response.content[0], 'text') else "",
             input_tokens=response.usage.input_tokens,
             output_tokens=response.usage.output_tokens,
             model=response.model,
             finish_reason=response.stop_reason or "stop",
+            tool_calls=tool_calls,
             raw_response=response
         )
 
@@ -236,12 +244,18 @@ class OpenAICompatibleProvider(LLMProvider):
 
         choice = response.choices[0]
 
+        # Extract tool calls if present
+        tool_calls = None
+        if hasattr(choice.message, 'tool_calls') and choice.message.tool_calls:
+            tool_calls = choice.message.tool_calls
+
         return LLMResponse(
             content=choice.message.content or "",
             input_tokens=response.usage.prompt_tokens if response.usage else 0,
             output_tokens=response.usage.completion_tokens if response.usage else 0,
             model=response.model,
             finish_reason=choice.finish_reason or "stop",
+            tool_calls=tool_calls,
             raw_response=response
         )
 

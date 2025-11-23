@@ -551,8 +551,12 @@ Be thorough but efficient. Ask good questions."""
 
                         # Parse arguments
                         try:
-                            args = json.loads(tool_call.function.arguments)
-                        except json.JSONDecodeError:
+                            args_str = tool_call.function.arguments
+                            if args_str is None or args_str == "":
+                                args = {}
+                            else:
+                                args = json.loads(args_str)
+                        except (json.JSONDecodeError, TypeError, AttributeError):
                             args = {}
 
                         # Handle user interaction tools
@@ -654,8 +658,7 @@ Is this correct? (yes/no/corrections)"""
                         elif self.design_tool_handler and tool_name in [t["function"]["name"] for t in DESIGN_CONTEXT_TOOLS]:
                             tool_result_data = self.design_tool_handler.handle_tool_call(
                                 tool_name=tool_name,
-                                arguments=args,
-                                context=context
+                                arguments=args
                             )
 
                             tool_result = {

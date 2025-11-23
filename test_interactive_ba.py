@@ -224,9 +224,9 @@ async def test_interactive_ba_conversation():
     # Build code graph (optional, but BA can use it)
     print("\n📊 Building code graph for existing codebase...")
     code_graph_analyzer = CodeGraphAnalyzer()
-    code_graph = code_graph_analyzer.build_graph(
-        project_path=project_path,
-        file_patterns=["backend/**/*.py"]
+    code_graph = await code_graph_analyzer.analyze_project(
+        project_path=Path(project_path),
+        exclude_patterns=["test_*", "*_test.py"]
     )
 
     print(f"   Modules analyzed: {code_graph.total_modules}")
@@ -235,7 +235,7 @@ async def test_interactive_ba_conversation():
     # Create design tool handler
     design_tool_handler = DesignContextToolHandler(
         code_graph=code_graph,
-        project_path=project_path
+        project_context={"project_path": project_path, "project_type": "e-commerce"}
     )
 
     # Create Business Analyst

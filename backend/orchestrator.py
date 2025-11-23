@@ -41,6 +41,7 @@ from code_graph import CodeGraphAnalyzer, CodeGraph
 from code_context_tools import CodeContextToolHandler
 from design_context_tools import DesignContextToolHandler
 from business_analyst import BusinessAnalyst, RequirementsAnalysis
+from linting_agent import LintingAgent, LintingResult
 from logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -86,6 +87,12 @@ class OrchestrationResult:
     # Phase 5: Requirements analysis
     requirements_analysis: Optional[RequirementsAnalysis] = None
 
+    # Phase 6: Linting statistics
+    total_lint_issues: int = 0
+    lint_issues_fixed: int = 0
+    lint_auto_fixed: int = 0
+    lint_llm_fixed: int = 0
+
 
 class HierarchicalOrchestrator:
     """
@@ -104,7 +111,9 @@ class HierarchicalOrchestrator:
         create_backups: bool = True,
         use_code_graph: bool = True,  # Phase 4: Enable code graph analysis
         generate_ai_descriptions: bool = False,  # Optional AI descriptions for UX
-        use_business_analyst: bool = True  # Phase 5: Enable requirements analysis
+        use_business_analyst: bool = True,  # Phase 5: Enable requirements analysis
+        use_linting: bool = True,  # Phase 6: Enable automatic linting/fixing
+        target_python_version: str = "3.12"  # Phase 6: Target Python version
     ):
         """
         Initialize the orchestrator
@@ -119,6 +128,8 @@ class HierarchicalOrchestrator:
             use_code_graph: Enable code graph analysis for context (Phase 4)
             generate_ai_descriptions: Generate AI descriptions for functions/classes
             use_business_analyst: Enable requirements analysis layer (Phase 5)
+            use_linting: Enable automatic linting and fixing (Phase 6)
+            target_python_version: Target Python version for linting (Phase 6)
         """
         self.llm_provider = llm_provider
         self.use_review_loops = use_review_loops
@@ -129,6 +140,8 @@ class HierarchicalOrchestrator:
         self.use_code_graph = use_code_graph
         self.generate_ai_descriptions = generate_ai_descriptions
         self.use_business_analyst = use_business_analyst
+        self.use_linting = use_linting
+        self.target_python_version = target_python_version
 
         # Phase 4: Initialize code graph analyzer and tool handler
         self.code_graph_analyzer = CodeGraphAnalyzer(
@@ -147,6 +160,15 @@ class HierarchicalOrchestrator:
         # Phase 5: Business Analyst for requirements analysis
         # Will be initialized with code_graph and design_tool_handler after project analysis
         self.business_analyst = None
+
+        # Phase 6: Linting Agent for code quality
+        self.linting_agent = LintingAgent(
+            llm_provider=llm_provider,
+            use_ruff=True,
+            use_mypy=True,
+            use_llm_fixes=True,
+            target_python_version=target_python_version
+        ) if use_linting else None
 
         # Initialize all decomposers with review loops
         self.system_decomposer = SystemDecomposer(
@@ -657,7 +679,42 @@ class HierarchicalOrchestrator:
         )
 
         # ================================================================
-        # Write to file
+        # TIER 4.5: Linting & Code Quality (Phase 6)
+        # ================================================================
+        if self.linting_agent:
+            logger.info("tier4.5_starting", tier="linting")
+
+            try:
+                lint_result = await self.linting_agent.lint_and_fix(
+                    code=code,
+                    filename=module_file.name,
+                    context=context
+                )
+
+                # Use linted code instead of original
+                code = lint_result.fixed_code
+
+                # Track linting statistics
+                result.total_lint_issues += lint_result.total_issues
+                result.lint_auto_fixed += lint_result.auto_fixed
+                result.lint_llm_fixed += lint_result.llm_fixed
+                result.lint_issues_fixed += (lint_result.auto_fixed + lint_result.llm_fixed)
+
+                logger.info(
+                    "tier4.5_complete",
+                    success=lint_result.success,
+                    issues_found=lint_result.total_issues,
+                    auto_fixed=lint_result.auto_fixed,
+                    llm_fixed=lint_result.llm_fixed,
+                    unfixed=lint_result.unfixed
+                )
+
+            except Exception as e:
+                logger.warning("linting_failed", error=str(e))
+                # Continue with original code if linting fails
+
+        # ================================================================
+        # TIER 5: Write to File
         # ================================================================
 
         await self._write_code_to_file(

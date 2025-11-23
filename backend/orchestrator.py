@@ -38,6 +38,7 @@ from planning.decomposition import (
     FunctionPlanner
 )
 from code_graph import CodeGraphAnalyzer, CodeGraph
+from code_context_tools import CodeContextToolHandler
 from logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -121,11 +122,15 @@ class HierarchicalOrchestrator:
         self.use_code_graph = use_code_graph
         self.generate_ai_descriptions = generate_ai_descriptions
 
-        # Phase 4: Initialize code graph analyzer
+        # Phase 4: Initialize code graph analyzer and tool handler
         self.code_graph_analyzer = CodeGraphAnalyzer(
             llm_provider=llm_provider if generate_ai_descriptions else None,
             generate_ai_descriptions=generate_ai_descriptions
         ) if use_code_graph else None
+
+        # Phase 4B: Tool handler for interactive context fetching
+        # Will be initialized with code_graph after project analysis
+        self.tool_handler = None
 
         # Initialize all decomposers with review loops
         self.system_decomposer = SystemDecomposer(
@@ -164,7 +169,9 @@ class HierarchicalOrchestrator:
             llm_provider=llm_provider,
             use_review_loop=use_review_loops,
             review_min_score=review_min_score,
-            review_max_iterations=review_max_iterations
+            review_max_iterations=review_max_iterations,
+            code_graph=None,  # Will be set after project analysis
+            tool_handler=None  # Will be set after project analysis
         )
 
         # State tracking
@@ -247,6 +254,15 @@ class HierarchicalOrchestrator:
 
                     # Add code graph to context for all decomposers
                     context["code_graph"] = code_graph
+
+                    # Phase 4B: Initialize tool handler for interactive context fetching
+                    self.tool_handler = CodeContextToolHandler(code_graph=code_graph)
+
+                    # Update function planner with code graph and tool handler
+                    self.function_planner.code_graph = code_graph
+                    self.function_planner.tool_handler = self.tool_handler
+
+                    logger.info("tool_handler_initialized", tools_available=True)
 
                 except Exception as e:
                     logger.warning("code_graph_analysis_failed", error=str(e))

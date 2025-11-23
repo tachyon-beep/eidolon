@@ -1114,10 +1114,12 @@ class FunctionPlanner:
         use_intelligent_selection: bool = True,
         use_review_loop: bool = True,
         review_min_score: float = 75.0,
-        review_max_iterations: int = 2
+        review_max_iterations: int = 2,
+        code_graph: Optional[Any] = None,
+        tool_handler: Optional[Any] = None
     ):
         """
-        Initialize FunctionPlanner with Phase 2.5 and Phase 3 improvements
+        Initialize FunctionPlanner with Phase 2.5, Phase 3, and Phase 4 improvements
 
         Args:
             llm_provider: LLM provider for making API calls
@@ -1125,6 +1127,8 @@ class FunctionPlanner:
             use_review_loop: Whether to use review-and-revise loop (default: True)
             review_min_score: Minimum quality score for code acceptance (default: 75.0)
             review_max_iterations: Maximum revision iterations (default: 2)
+            code_graph: Optional code graph for context enrichment (Phase 4)
+            tool_handler: Optional CodeContextToolHandler for interactive context fetching (Phase 4)
         """
         self.llm_provider = llm_provider
         self.use_intelligent_selection = use_intelligent_selection
@@ -1138,6 +1142,10 @@ class FunctionPlanner:
         # Phase 3: Review loop for quality improvement
         from planning.review_loop import ReviewLoop
         self.review_loop = ReviewLoop(llm_provider) if use_review_loop else None
+
+        # Phase 4: Code graph and interactive tool calling
+        self.code_graph = code_graph
+        self.tool_handler = tool_handler
 
     async def generate_implementation(
         self,
@@ -1271,48 +1279,135 @@ class FunctionPlanner:
         if is_revision and revision_feedback:
             prompts["user"] += f"\n\n---\n**REVISION REQUEST**\n\nYour previous implementation received the following review feedback. Please revise the code to address these issues:\n\n{revision_feedback}\n\nProvide an improved implementation that addresses all the feedback."
 
-        # Phase 2.5 Step 3: Call LLM with structured output support
-        try:
-            response = await self.llm_provider.create_completion(
-                messages=[
-                    {"role": "system", "content": prompts["system"]},
-                    {"role": "user", "content": prompts["user"]}
-                ],
-                max_tokens=3072,  # More tokens for code generation
-                temperature=0.0,
-                response_format={"type": "json_object"}  # Structured output
-            )
-        except (TypeError, Exception) as e:
-            # Fallback if response_format not supported
-            logger.warning(f"Structured output not supported: {e}, using regular mode")
-            response = await self.llm_provider.create_completion(
-                messages=[
-                    {"role": "system", "content": prompts["system"]},
-                    {"role": "user", "content": prompts["user"]}
-                ],
-                max_tokens=3072,
-                temperature=0.0
-            )
+        # Phase 4: Add rich context from code graph if available
+        if context.get("rich_context"):
+            rich_ctx = context["rich_context"]
+            context_info = f"\n\n**Available Code Context:**\n"
+            context_info += f"- This function is called by {len(rich_ctx.get('callers', []))} other functions\n"
+            context_info += f"- This function calls {len(rich_ctx.get('callees', []))} other functions\n"
+            context_info += f"- Related classes: {len(rich_ctx.get('related_classes', []))}\n"
+            context_info += f"\nYou can use the following tools to fetch more context as needed:\n"
+            context_info += f"- get_function_definition: Get source code of a specific function\n"
+            context_info += f"- get_function_callers: See who calls a function\n"
+            context_info += f"- get_function_callees: See what a function calls\n"
+            context_info += f"- get_class_definition: Get a class's source code\n"
+            context_info += f"- get_module_overview: Get overview of a module\n"
+            context_info += f"- search_functions: Search for functions by name\n"
+            prompts["user"] += context_info
 
-        # Phase 2.5 Step 4: Extract JSON or code from response
-        # For code generation, the response might be direct code OR JSON
+        # Phase 2.5 Step 3 + Phase 4: Call LLM with tool calling support
+        messages = [
+            {"role": "system", "content": prompts["system"]},
+            {"role": "user", "content": prompts["user"]}
+        ]
+
+        # Phase 4: Multi-turn conversation with tool calling
+        max_turns = 5  # Prevent infinite loops
+        turn = 0
         result = None
 
-        # Try extracting JSON first
-        plan = extract_json_from_response(response.content)
-        if plan and "code" in plan:
-            result = plan
-        else:
-            # If no JSON, treat entire response as code
-            logger.warning("No JSON in response, treating as direct code")
-            result = {
-                "code": response.content.strip(),
-                "explanation": "Generated implementation"
-            }
+        # Check if tool calling is available
+        use_tools = self.tool_handler is not None and not is_revision
+
+        while turn < max_turns:
+            turn += 1
+
+            try:
+                # Prepare API call parameters
+                call_params = {
+                    "messages": messages,
+                    "max_tokens": 3072,
+                    "temperature": 0.0
+                }
+
+                # Add tools if available (Phase 4)
+                if use_tools:
+                    from code_context_tools import CODE_CONTEXT_TOOLS
+                    call_params["tools"] = CODE_CONTEXT_TOOLS
+                    call_params["tool_choice"] = "auto"
+                else:
+                    # Phase 2.5: Structured output
+                    call_params["response_format"] = {"type": "json_object"}
+
+                response = await self.llm_provider.create_completion(**call_params)
+
+            except (TypeError, Exception) as e:
+                # Fallback if tools/response_format not supported
+                logger.warning(f"Advanced features not supported: {e}, using regular mode")
+                response = await self.llm_provider.create_completion(
+                    messages=messages,
+                    max_tokens=3072,
+                    temperature=0.0
+                )
+
+            # Phase 4: Check if LLM made tool calls
+            tool_calls = getattr(response, 'tool_calls', None)
+
+            if tool_calls and use_tools:
+                # LLM requested tool calls - execute them
+                logger.info(
+                    "tool_calls_requested",
+                    function=function_name,
+                    count=len(tool_calls),
+                    turn=turn
+                )
+
+                # Add assistant's message with tool calls to conversation
+                messages.append({
+                    "role": "assistant",
+                    "content": response.content or "",
+                    "tool_calls": tool_calls
+                })
+
+                # Execute each tool call
+                for tool_call in tool_calls:
+                    tool_name = tool_call.function.name
+                    tool_args = json.loads(tool_call.function.arguments)
+
+                    logger.info(
+                        "executing_tool_call",
+                        tool=tool_name,
+                        args=tool_args
+                    )
+
+                    # Execute tool via handler
+                    tool_result = self.tool_handler.handle_tool_call(
+                        tool_name=tool_name,
+                        arguments=tool_args
+                    )
+
+                    # Add tool result to conversation
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": json.dumps(tool_result)
+                    })
+
+                # Continue conversation loop (LLM will see tool results)
+                continue
+
+            # No tool calls - process as code response
+            # Phase 2.5 Step 4: Extract JSON or code from response
+            plan = extract_json_from_response(response.content)
+            if plan and "code" in plan:
+                result = plan
+                break
+            elif response.content:
+                # If no JSON, treat entire response as code
+                logger.warning("No JSON in response, treating as direct code")
+                result = {
+                    "code": response.content.strip(),
+                    "explanation": "Generated implementation"
+                }
+                break
+            else:
+                # Empty response, continue loop
+                logger.warning(f"Empty response on turn {turn}, continuing...")
+                continue
 
         # Validate we got some code
         if not result or not result.get("code"):
-            logger.error("Failed to generate code, using placeholder")
+            logger.error("Failed to generate code after all turns, using placeholder")
             result = {
                 "code": f"def {function_name}():\n    '''TODO: {task.instruction}'''\n    pass",
                 "explanation": "Placeholder implementation (code generation failed)"
@@ -1322,7 +1417,9 @@ class FunctionPlanner:
             "function_code_generated",
             function=function_name,
             code_length=len(result.get("code", "")),
-            is_revision=is_revision
+            is_revision=is_revision,
+            turns_used=turn,
+            tools_enabled=use_tools
         )
 
         return result

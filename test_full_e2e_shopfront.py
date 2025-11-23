@@ -17,74 +17,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "backend"))
 
-from openai import AsyncOpenAI
 from business_analyst import BusinessAnalyst
 from code_graph import CodeGraphAnalyzer
 from specialist_agents import create_default_registry
 from orchestrator import HierarchicalOrchestrator
+from llm_providers import create_provider
 from logging_config import get_logger
 
 logger = get_logger(__name__)
-
-
-class GPT5Provider:
-    """GPT-5.1 Provider with reasoning support"""
-
-    def __init__(self, api_key: str):
-        self.client = AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=api_key
-        )
-        self.model = "openai/gpt-5.1"
-
-    async def create_completion(
-        self,
-        messages: list,
-        max_tokens: int = 1024,
-        temperature: float = 0.0,
-        tools=None,
-        **kwargs
-    ):
-        """Create completion with reasoning enabled"""
-
-        params = {
-            "model": self.model,
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        }
-
-        if tools:
-            params["tools"] = tools
-
-        # Enable reasoning for better decisions
-        params["extra_body"] = {"reasoning": {"enabled": True}}
-
-        response = await self.client.chat.completions.create(**params)
-        choice = response.choices[0]
-
-        # Extract tool calls if present
-        tool_calls = None
-        if hasattr(choice.message, 'tool_calls') and choice.message.tool_calls:
-            tool_calls = choice.message.tool_calls
-
-        # Return response object
-        class Response:
-            def __init__(self, content, tool_calls):
-                self.content = content
-                self.tool_calls = tool_calls
-                self.input_tokens = response.usage.prompt_tokens if response.usage else 0
-                self.output_tokens = response.usage.completion_tokens if response.usage else 0
-                self.model = response.model
-                self.finish_reason = choice.finish_reason or "stop"
-
-        return Response(choice.message.content or "", tool_calls)
-
-    def get_model_name(self):
-        return self.model
-
-    def get_provider_name(self):
-        return "openai-gpt5"
 
 
 async def run_full_e2e_shopfront():
@@ -105,9 +45,15 @@ async def run_full_e2e_shopfront():
 
     print("\n✅ API key found\n")
 
-    # Create GPT-5.1 provider
-    print("🧠 Initializing GPT-5.1 provider...")
-    llm_provider = GPT5Provider(api_key=api_key)
+    # Create LLM provider from .env (Claude Sonnet 4.5)
+    model_name = os.environ.get("OPENROUTER_MODEL", "anthropic/claude-sonnet-4.5")
+    print(f"🧠 Initializing {model_name}...")
+    llm_provider = create_provider(
+        provider_type="openai",
+        api_key=api_key,
+        base_url="https://openrouter.ai/api/v1",
+        model=model_name
+    )
 
     project_path = str(Path(__file__).parent)
     output_dir = Path(project_path) / "generated_shopfront"

@@ -923,11 +923,18 @@ Is this correct? (yes/no/corrections)"""
 
                             if specialist:
                                 try:
-                                    # Delegate to specialist
-                                    specialist_response = await specialist.consult(
-                                        query=args.get("query", ""),
+                                    # Delegate to specialist analyze method
+                                    report = await specialist.analyze(
+                                        code=args.get("query", ""),  # Use query as code input
                                         context={"project_path": project_path}
                                     )
+
+                                    # Extract recommendations or summary from report
+                                    if isinstance(report, dict):
+                                        specialist_response = json.dumps(report)
+                                    else:
+                                        # SpecialistReport object - extract summary
+                                        specialist_response = f"Domain: {report.domain}\nSummary: {report.summary}\nRecommendations: {len(report.recommendations)}"
 
                                     tool_result = {
                                         "role": "tool",

@@ -340,7 +340,22 @@ class HierarchicalOrchestrator:
             requirements_analysis = None
             refined_request = user_request  # Default to original request
 
-            if self.business_analyst:
+            # Check if requirements already provided in context (e.g., from interactive BA)
+            if context.get("requirements_analysis"):
+                logger.info("tier0.5_skipped", reason="requirements_already_provided")
+                requirements_analysis = context["requirements_analysis"]
+                refined_request = requirements_analysis.refined_requirements
+                result.requirements_analysis = requirements_analysis
+
+                logger.info(
+                    "tier0.5_using_provided_analysis",
+                    change_type=requirements_analysis.change_type,
+                    complexity=requirements_analysis.complexity_estimate,
+                    affected_subsystems=len(requirements_analysis.affected_subsystems or []),
+                    analysis_turns=requirements_analysis.analysis_turns
+                )
+
+            elif self.business_analyst:
                 logger.info("tier0.5_starting", tier="business_analysis")
                 try:
                     requirements_analysis = await self.business_analyst.analyze_request(

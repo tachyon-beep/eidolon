@@ -271,10 +271,13 @@ class SystemDecomposer:
                 if hasattr(response, 'raw_response') and response.raw_response:
                     # Convert message object to dict format for consistency
                     assistant_msg = response.raw_response.choices[0].message
-                    messages.append({
+                    msg_dict = {
                         "role": "assistant",
-                        "content": assistant_msg.content or "",
-                        "tool_calls": [
+                        "content": assistant_msg.content or ""
+                    }
+                    # Only add tool_calls if they exist (don't send null/None)
+                    if assistant_msg.tool_calls:
+                        msg_dict["tool_calls"] = [
                             {
                                 "id": tc.id,
                                 "type": tc.type,
@@ -283,9 +286,9 @@ class SystemDecomposer:
                                     "arguments": tc.function.arguments
                                 }
                             }
-                            for tc in (assistant_msg.tool_calls or [])
-                        ] if assistant_msg.tool_calls else None
-                    })
+                            for tc in assistant_msg.tool_calls
+                        ]
+                    messages.append(msg_dict)
                 else:
                     # Fallback for providers without raw_response
                     messages.append({

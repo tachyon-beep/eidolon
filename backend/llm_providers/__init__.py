@@ -235,13 +235,18 @@ class OpenAICompatibleProvider(LLMProvider):
     ) -> LLMResponse:
         """Create completion using OpenAI-compatible API"""
 
-        # Add OpenRouter-specific headers if using OpenRouter
+        # Add OpenRouter-specific headers and parameters if using OpenRouter
         if self.provider_name == "openrouter":
             if "extra_headers" not in kwargs:
                 kwargs["extra_headers"] = {
                     "HTTP-Referer": "https://github.com/studious-adventure",
                     "X-Title": "Studious Adventure Code Generator"
                 }
+            # Force sequential tool calls to avoid 500 errors with parallel tool results
+            # OpenRouter + Claude has issues handling multiple parallel tool calls
+            # See: https://github.com/567-labs/instructor/issues/676
+            if "tools" in kwargs:
+                kwargs["parallel_tool_calls"] = False
 
         response = await self.client.chat.completions.create(
             model=self.model,

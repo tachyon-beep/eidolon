@@ -266,7 +266,8 @@ class SystemDecomposer:
 
                 for tool_call in tool_calls:
                     tool_name = tool_call.function.name
-                    tool_args = json.loads(tool_call.function.arguments)
+                    args_str = tool_call.function.arguments
+                    tool_args = json.loads(args_str) if args_str else {}
 
                     logger.info(
                         "executing_design_tool_call",
@@ -629,7 +630,8 @@ class SubsystemDecomposer:
 
                 for tool_call in tool_calls:
                     tool_name = tool_call.function.name
-                    tool_args = json.loads(tool_call.function.arguments)
+                    args_str = tool_call.function.arguments
+                    tool_args = json.loads(args_str) if args_str else {}
 
                     logger.info(
                         "executing_design_tool_call",
@@ -988,7 +990,8 @@ class ModuleDecomposer:
                 # Execute each tool call
                 for tool_call in tool_calls:
                     tool_name = tool_call.function.name
-                    tool_args = json.loads(tool_call.function.arguments)
+                    args_str = tool_call.function.arguments
+                    tool_args = json.loads(args_str) if args_str else {}
 
                     logger.info(
                         "executing_design_tool_call",
@@ -1629,7 +1632,8 @@ class FunctionPlanner:
                 # Execute each tool call
                 for tool_call in tool_calls:
                     tool_name = tool_call.function.name
-                    tool_args = json.loads(tool_call.function.arguments)
+                    args_str = tool_call.function.arguments
+                    tool_args = json.loads(args_str) if args_str else {}
 
                     logger.info(
                         "executing_tool_call",

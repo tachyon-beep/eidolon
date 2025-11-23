@@ -25,6 +25,7 @@ from llm_providers import OpenAICompatibleProvider
 from business_analyst import BusinessAnalyst
 from design_context_tools import DesignContextToolHandler
 from code_graph import CodeGraphAnalyzer
+from specialist_agents import create_default_registry
 from logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -238,12 +239,30 @@ async def test_interactive_ba_conversation():
         project_context={"project_path": project_path, "project_type": "e-commerce"}
     )
 
+    # Create specialist registry
+    print("\n🔧 Creating specialist registry with all 12 domain experts...")
+    specialist_registry = create_default_registry(llm_provider)
+    print("   ✅ 12 specialists registered:")
+    print("      • Security Engineer")
+    print("      • Test Engineer")
+    print("      • Deployment Specialist")
+    print("      • Frontend Specialist")
+    print("      • Database Specialist")
+    print("      • API Specialist")
+    print("      • Data Specialist")
+    print("      • Integration Specialist")
+    print("      • Diagnostic Specialist")
+    print("      • Performance Specialist")
+    print("      • PyTorch Engineer")
+    print("      • UX Specialist")
+
     # Create Business Analyst
     print("\n🎓 Creating Business Analyst with interactive tools...")
     ba = BusinessAnalyst(
         llm_provider=llm_provider,
         code_graph=code_graph,
-        design_tool_handler=design_tool_handler
+        design_tool_handler=design_tool_handler,
+        specialist_registry=specialist_registry
     )
 
     # Define shopfront requirements

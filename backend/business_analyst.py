@@ -36,6 +36,7 @@ import json
 from llm_providers import LLMProvider
 from code_graph import CodeGraph
 from design_context_tools import DesignContextToolHandler, DESIGN_CONTEXT_TOOLS
+from specialist_agents import SpecialistRegistry, SpecialistDomain
 from logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -120,6 +121,216 @@ USER_INTERACTION_TOOLS = [
 ]
 
 
+# Specialist consultation tools for Business Analyst
+# These allow the BA to delegate to domain-specific expert agents
+SPECIALIST_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "consult_security_engineer",
+            "description": "Consult the Security Engineer specialist for security analysis, vulnerability assessment, OWASP Top 10, authentication/authorization design, and security best practices.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The security question or task to delegate to the security specialist"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consult_test_engineer",
+            "description": "Consult the Test Engineer specialist for testing strategy, test pyramid design, pytest generation, mocking, fixtures, and test coverage analysis.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The testing question or task to delegate to the test specialist"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consult_deployment_specialist",
+            "description": "Consult the Deployment Specialist for Docker, Kubernetes, Terraform, CI/CD pipelines, cloud deployment, and infrastructure as code.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The deployment question or task to delegate to the deployment specialist"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consult_frontend_specialist",
+            "description": "Consult the Frontend Specialist for React/Vue components, state management, hooks, responsive design, and frontend architecture.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The frontend question or task to delegate to the frontend specialist"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consult_database_specialist",
+            "description": "Consult the Database Specialist for schema design, query optimization, indexing strategies, migrations, ORMs, and database best practices.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The database question or task to delegate to the database specialist"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consult_api_specialist",
+            "description": "Consult the API Specialist for RESTful/GraphQL API design, endpoint design, error handling (RFC 7807), versioning, and API best practices.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The API design question or task to delegate to the API specialist"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consult_data_specialist",
+            "description": "Consult the Data Specialist for ETL pipelines, data processing, data validation, pandas/polars, and data engineering tasks.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The data engineering question or task to delegate to the data specialist"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consult_integration_specialist",
+            "description": "Consult the Integration Specialist for third-party API integration, webhooks, OAuth, API clients, and integration patterns.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The integration question or task to delegate to the integration specialist"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consult_diagnostic_specialist",
+            "description": "Consult the Diagnostic Specialist for debugging, profiling, tracing, error analysis, and troubleshooting production issues.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The debugging or diagnostic question to delegate to the diagnostic specialist"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consult_performance_specialist",
+            "description": "Consult the Performance Specialist for Big-O analysis, algorithmic optimization, caching strategies, and performance tuning.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The performance optimization question or task to delegate to the performance specialist"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consult_pytorch_engineer",
+            "description": "Consult the PyTorch Engineer specialist for ML model design, neural network architecture, training loops, and PyTorch best practices.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The ML/PyTorch question or task to delegate to the PyTorch specialist"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consult_ux_specialist",
+            "description": "Consult the UX Specialist for user experience design, WCAG accessibility, user flows, interaction patterns, and usability analysis.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The UX design question or task to delegate to the UX specialist"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    }
+]
+
+
 @dataclass
 class RequirementsAnalysis:
     """Result of business analyst requirements analysis"""
@@ -165,7 +376,8 @@ class BusinessAnalyst:
         self,
         llm_provider: LLMProvider,
         code_graph: Optional[CodeGraph] = None,
-        design_tool_handler: Optional[DesignContextToolHandler] = None
+        design_tool_handler: Optional[DesignContextToolHandler] = None,
+        specialist_registry: Optional[SpecialistRegistry] = None
     ):
         """
         Initialize Business Analyst
@@ -174,10 +386,28 @@ class BusinessAnalyst:
             llm_provider: LLM provider for analysis
             code_graph: Code graph for understanding existing codebase
             design_tool_handler: Design tools for exploring architecture
+            specialist_registry: Registry of specialist agents for delegation
         """
         self.llm_provider = llm_provider
         self.code_graph = code_graph
         self.design_tool_handler = design_tool_handler
+        self.specialist_registry = specialist_registry
+
+        # Map tool names to specialist domains
+        self.specialist_tool_map = {
+            "consult_security_engineer": SpecialistDomain.SECURITY,
+            "consult_test_engineer": SpecialistDomain.TESTING,
+            "consult_deployment_specialist": SpecialistDomain.DEPLOYMENT,
+            "consult_frontend_specialist": SpecialistDomain.FRONTEND,
+            "consult_database_specialist": SpecialistDomain.DATABASE,
+            "consult_api_specialist": SpecialistDomain.API,
+            "consult_data_specialist": SpecialistDomain.DATA,
+            "consult_integration_specialist": SpecialistDomain.INTEGRATION,
+            "consult_diagnostic_specialist": SpecialistDomain.DIAGNOSTICS,
+            "consult_performance_specialist": SpecialistDomain.PERFORMANCE,
+            "consult_pytorch_engineer": SpecialistDomain.ML_PYTORCH,
+            "consult_ux_specialist": SpecialistDomain.UX
+        }
 
     async def analyze_request(
         self,
@@ -472,9 +702,18 @@ CONFIDENCE LEVELS:
 
 TOOLS AVAILABLE:
 1. Design context tools (explore codebase)
-2. ask_user_question (clarifying questions)
-3. confirm_understanding (summarize and confirm)
-4. initiate_build (FIRE! Start the build)
+2. Specialist consultation tools (delegate to domain experts)
+3. ask_user_question (clarifying questions)
+4. confirm_understanding (summarize and confirm)
+5. initiate_build (FIRE! Start the build)
+
+DELEGATION STRATEGY:
+- Use specialist tools to delegate complex domain-specific questions
+- Security concerns → consult_security_engineer
+- Testing strategy → consult_test_engineer
+- Database design → consult_database_specialist
+- API design → consult_api_specialist
+- etc.
 
 CRITICAL: Only call initiate_build when:
 - Requirements are complete and clear
@@ -508,6 +747,8 @@ Be thorough but efficient. Ask good questions."""
         all_tools = list(USER_INTERACTION_TOOLS)
         if self.design_tool_handler:
             all_tools.extend(DESIGN_CONTEXT_TOOLS)
+        if self.specialist_registry:
+            all_tools.extend(SPECIALIST_TOOLS)
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -667,6 +908,67 @@ Is this correct? (yes/no/corrections)"""
                                 "content": json.dumps(tool_result_data)
                             }
                             messages.append(tool_result)
+
+                        # Handle specialist consultation tools
+                        elif self.specialist_registry and tool_name in self.specialist_tool_map:
+                            specialist_domain = self.specialist_tool_map[tool_name]
+                            specialist = self.specialist_registry.get_specialist(specialist_domain)
+
+                            logger.info(
+                                "ba_consulting_specialist",
+                                tool=tool_name,
+                                domain=specialist_domain.value,
+                                query=args.get("query", "")[:100]
+                            )
+
+                            if specialist:
+                                try:
+                                    # Delegate to specialist
+                                    specialist_response = await specialist.consult(
+                                        query=args.get("query", ""),
+                                        context={"project_path": project_path}
+                                    )
+
+                                    tool_result = {
+                                        "role": "tool",
+                                        "tool_call_id": tool_call.id,
+                                        "content": json.dumps({
+                                            "specialist": specialist_domain.value,
+                                            "response": specialist_response,
+                                            "status": "success"
+                                        })
+                                    }
+                                    messages.append(tool_result)
+
+                                    logger.info(
+                                        "ba_specialist_consulted",
+                                        domain=specialist_domain.value,
+                                        response_length=len(specialist_response)
+                                    )
+
+                                except Exception as e:
+                                    logger.error(
+                                        "ba_specialist_error",
+                                        domain=specialist_domain.value,
+                                        error=str(e)
+                                    )
+                                    tool_result = {
+                                        "role": "tool",
+                                        "tool_call_id": tool_call.id,
+                                        "content": json.dumps({
+                                            "error": f"Specialist consultation failed: {str(e)}"
+                                        })
+                                    }
+                                    messages.append(tool_result)
+                            else:
+                                tool_result = {
+                                    "role": "tool",
+                                    "tool_call_id": tool_call.id,
+                                    "content": json.dumps({
+                                        "error": f"Specialist {specialist_domain.value} not available"
+                                    })
+                                }
+                                messages.append(tool_result)
 
                         else:
                             # Unknown tool

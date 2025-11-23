@@ -236,6 +236,15 @@ class SystemDecomposer:
                     call_params["tool_choice"] = "auto"
                 # Note: Claude follows JSON prompts well without response_format
 
+                # Debug logging for message structure
+                if turn > 1:
+                    logger.debug(
+                        "llm_call_messages",
+                        turn=turn,
+                        message_count=len(messages),
+                        message_roles=[m.get("role") if isinstance(m, dict) else getattr(m, "role", "unknown") for m in messages]
+                    )
+
                 response = await self.llm_provider.create_completion(**call_params)
 
             except (TypeError, Exception) as e:
@@ -260,8 +269,23 @@ class SystemDecomposer:
                 # Use the properly formatted message from the raw response
                 # This ensures tool_calls are correctly serialized for the API
                 if hasattr(response, 'raw_response') and response.raw_response:
-                    assistant_message = response.raw_response.choices[0].message
-                    messages.append(assistant_message)
+                    # Convert message object to dict format for consistency
+                    assistant_msg = response.raw_response.choices[0].message
+                    messages.append({
+                        "role": "assistant",
+                        "content": assistant_msg.content or "",
+                        "tool_calls": [
+                            {
+                                "id": tc.id,
+                                "type": tc.type,
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments
+                                }
+                            }
+                            for tc in (assistant_msg.tool_calls or [])
+                        ] if assistant_msg.tool_calls else None
+                    })
                 else:
                     # Fallback for providers without raw_response
                     messages.append({
@@ -629,8 +653,23 @@ class SubsystemDecomposer:
 
                 # Use the properly formatted message from the raw response
                 if hasattr(response, 'raw_response') and response.raw_response:
-                    assistant_message = response.raw_response.choices[0].message
-                    messages.append(assistant_message)
+                    # Convert message object to dict format for consistency
+                    assistant_msg = response.raw_response.choices[0].message
+                    messages.append({
+                        "role": "assistant",
+                        "content": assistant_msg.content or "",
+                        "tool_calls": [
+                            {
+                                "id": tc.id,
+                                "type": tc.type,
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments
+                                }
+                            }
+                            for tc in (assistant_msg.tool_calls or [])
+                        ] if assistant_msg.tool_calls else None
+                    })
                 else:
                     # Fallback for providers without raw_response
                     messages.append({

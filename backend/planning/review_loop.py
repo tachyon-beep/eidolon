@@ -13,6 +13,7 @@ This enables agent negotiation and self-correction at each tier.
 from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
+import json
 
 from llm_providers import LLMProvider
 from planning.agent_selector import AgentRole

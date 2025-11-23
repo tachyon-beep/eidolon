@@ -39,6 +39,7 @@ from planning.decomposition import (
 )
 from code_graph import CodeGraphAnalyzer, CodeGraph
 from code_context_tools import CodeContextToolHandler
+from design_context_tools import DesignContextToolHandler
 from logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -132,6 +133,10 @@ class HierarchicalOrchestrator:
         # Will be initialized with code_graph after project analysis
         self.tool_handler = None
 
+        # Phase 4C: Design tool handler for interactive design exploration
+        # Will be initialized with code_graph after project analysis
+        self.design_tool_handler = None
+
         # Initialize all decomposers with review loops
         self.system_decomposer = SystemDecomposer(
             llm_provider=llm_provider,
@@ -154,7 +159,8 @@ class HierarchicalOrchestrator:
             use_intelligent_selection=True,
             use_review_loop=use_review_loops,
             review_min_score=review_min_score,
-            review_max_iterations=review_max_iterations
+            review_max_iterations=review_max_iterations,
+            design_tool_handler=None  # Will be set after project analysis
         )
 
         self.class_decomposer = ClassDecomposer(
@@ -263,6 +269,18 @@ class HierarchicalOrchestrator:
                     self.function_planner.tool_handler = self.tool_handler
 
                     logger.info("tool_handler_initialized", tools_available=True)
+
+                    # Phase 4C: Initialize design tool handler for interactive design
+                    self.design_tool_handler = DesignContextToolHandler(
+                        code_graph=code_graph,
+                        project_context=self.project_context if hasattr(self, 'project_context') else None,
+                        design_constraints=context.get("design_constraints")
+                    )
+
+                    # Update module decomposer with design tool handler
+                    self.module_decomposer.design_tool_handler = self.design_tool_handler
+
+                    logger.info("design_tool_handler_initialized", design_tools_available=True)
 
                 except Exception as e:
                     logger.warning("code_graph_analysis_failed", error=str(e))

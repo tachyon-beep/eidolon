@@ -290,11 +290,14 @@ Keep it simple but functional. Generate actual working code.
 
         print(f"\n📊 Generation Statistics:")
         print(f"   Status: {result.status}")
-        print(f"   Total tasks: {result.total_tasks}")
-        print(f"   Completed: {result.completed_tasks}")
-        print(f"   Failed: {result.failed_tasks}")
+        print(f"   Success: {result.success}")
+        print(f"   Total tasks: {result.tasks_total}")
+        print(f"   Completed: {result.tasks_completed}")
+        print(f"   Failed: {result.tasks_failed}")
+        print(f"   Files created: {result.files_created}")
+        print(f"   Files modified: {result.files_modified}")
 
-        generated_files = result.generated_files or []
+        generated_files = result.files_written or []
         print(f"   Files generated: {len(generated_files)}")
 
         if generated_files:

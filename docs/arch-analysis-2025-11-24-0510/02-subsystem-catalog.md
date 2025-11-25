@@ -1,541 +1,555 @@
-# Subsystem Catalog - Eidolon Architecture
+# Eidolon Subsystem Catalog
 
-**Analysis Date:** 2025-11-24
-**Analyst:** System Archaeologist
-**Total Subsystems:** 14
-**Confidence:** High
+## Overview
 
----
-
-## Subsystem 1: models
-
-**Location:** `src/eidolon/models/`
-**Primary Responsibility:** Core data models and type definitions for the entire system
-
-**Key Components:**
-- `card.py` - Card model with types (Review, Change, Architecture, Test, Defect, Requirement), statuses, priorities, metrics, and audit logging
-- `agent.py` - Agent model with scopes (System, Module, Class, Function), session history, snapshots, and findings
-- `task.py` - Task model with task graph, assignments, and results
-- `__init__.py` - Exports all models and enums
-
-**Dependencies:**
-- **Inbound:** Used by ALL subsystems (storage, agents, api, analysis, planning, etc.)
-- **Outbound:** Only Pydantic (external dependency)
-
-**Patterns Observed:**
-- Pydantic-based models for validation and serialization
-- Comprehensive type system with enums for statuses, types, priorities
-- Rich metadata (metrics, audit logs, links)
-- Immutable data structures with validation
-
-**Confidence:** Very High (complete, well-structured, central to architecture)
+This document catalogs the 12 major subsystems identified in the Eidolon codebase, their responsibilities, key components, dependencies, and observed patterns.
 
 ---
 
-## Subsystem 2: agents
+## 1. API Layer
 
-**Location:** `src/eidolon/agents/`
-**Primary Responsibility:** Hierarchical agent orchestration and deployment
+**Location:** `src/eidolon/api/`, `src/eidolon/main.py`
+**Responsibility:** HTTP/WebSocket interface for all external interactions
 
-**Key Components:**
-- `orchestrator.py` - Main AgentOrchestrator class with parallel execution, LLM integration, caching, resilience patterns
-- `implementation_orchestrator.py` - ImplementationOrchestrator for code generation tasks
-- `__init__.py` - Exports both orchestrators
+### Key Components
+| File | Purpose | LOC |
+|------|---------|-----|
+| `main.py` | FastAPI application entry point, startup/shutdown, middleware | ~130 |
+| `api/routes.py` | All endpoint handlers, WebSocket manager | ~800 |
 
-**Dependencies:**
-- **Inbound:** api (routes create orchestrator), main.py (startup initialization)
-- **Outbound:** models (Card, Agent), storage (Database), cache (CacheManager), llm_providers (LLMProvider), resilience (retry, timeout, circuit breaker, rate limiter), analysis (CodeAnalyzer), git_integration (GitManager)
+### Entry Points
+- `create_routes(db, orchestrator)` - Factory function returning router + WebSocket manager
+- FastAPI app at `main.py:app`
 
-**Patterns Observed:**
-- Orchestrator pattern for coordinating hierarchical agents
-- Concurrency control with semaphores (max_concurrent_functions, max_concurrent_modules)
-- Resilience integration (timeouts, retries, circuit breakers, rate limiting)
-- Progress tracking and metrics collection
-- Provider abstraction for multi-LLM support
+### Dependencies (Inbound)
+- Frontend (HTTP + WebSocket clients)
 
-**Confidence:** Very High (core orchestration logic, well-implemented)
+### Dependencies (Outbound)
+- `AgentOrchestrator` - For analysis operations
+- `Database` - For card/agent persistence
+- `CacheManager` - For cache operations
+- `HealthChecker` - For health endpoints
 
----
+### Patterns Observed
+- **Factory Pattern**: `create_routes()` creates router with injected dependencies
+- **WebSocket Manager Pattern**: Connection tracking and broadcast
+- **Pydantic Request Models**: Input validation
 
-## Subsystem 3: api
-
-**Location:** `src/eidolon/api/`
-**Primary Responsibility:** REST and WebSocket endpoints for frontend-backend communication
-
-**Key Components:**
-- `routes.py` - FastAPI router with card CRUD, agent queries, analysis triggers, WebSocket manager
-- `__init__.py` - Exports create_routes, router, WebSocket manager
-
-**Dependencies:**
-- **Inbound:** main.py (includes router at /api), frontend (HTTP/WebSocket clients)
-- **Outbound:** models (Card, Agent), storage (Database), agents (AgentOrchestrator), request_context (analysis_registry)
-
-**Patterns Observed:**
-- RESTful API design
-- WebSocket for real-time updates and progress broadcasts
-- Connection manager pattern for WebSocket clients
-- Async endpoints throughout
-
-**Confidence:** High (standard FastAPI implementation, likely complete for MVP)
+### Issues
+- WebSocket broadcasts to ALL clients (no filtering)
+- CORS origins hard-coded
+- No authentication/authorization
 
 ---
 
-## Subsystem 4: storage
+## 2. Agent Orchestration
 
-**Location:** `src/eidolon/storage/`
-**Primary Responsibility:** SQLite database layer with async operations
+**Location:** `src/eidolon/orchestrator.py`, `src/eidolon/agents/`
+**Responsibility:** Coordinates hierarchical agent execution for code generation and analysis
 
-**Key Components:**
-- `database.py` - Database class with async CRUD for cards and agents, connection management
-- `__init__.py` - Exports Database class
+### Key Components
+| File | Purpose | LOC |
+|------|---------|-----|
+| `orchestrator.py` | HierarchicalOrchestrator - 6-phase code generation pipeline | ~1000 |
+| `agents/orchestrator.py` | AgentOrchestrator - 5-tier analysis with parallel execution | ~1100 |
 
-**Dependencies:**
-- **Inbound:** main.py (creates database), api (queries data), agents (persists cards/agents), health (connectivity checks)
-- **Outbound:** models (Card, Agent), aiosqlite (external), logging_config
+### Key Classes
+```python
+class HierarchicalOrchestrator:
+    async def orchestrate(user_request, project_path) -> OrchestrationResult
 
-**Patterns Observed:**
-- Repository pattern for data access
-- Async/await for all database operations
-- Connection lifecycle management (connect, close)
-- Automatic table creation
-- UUID-based ID generation
+class AgentOrchestrator:
+    async def analyze_codebase(path) -> Agent
+    async def analyze_incremental(path, base) -> Dict
+```
 
-**Confidence:** Very High (complete CRUD implementation visible)
+### Dependencies (Inbound)
+- API Layer (triggers analysis)
 
----
+### Dependencies (Outbound)
+- `BusinessAnalyst`, `SystemDecomposer`, `FunctionPlanner` (planning)
+- `CodeGraphAnalyzer`, `CodeContextToolHandler` (context)
+- `LintingAgent` (quality)
+- `Database`, `CacheManager` (persistence)
+- `LLMProvider` (via resilience wrappers)
 
-## Subsystem 5: analysis
+### Patterns Observed
+- **Hierarchical Decomposition**: Top-down task breakdown
+- **Parallel Execution**: `asyncio.gather()` with semaphores
+- **Graceful Degradation**: Continues on partial failures
+- **Progress Tracking**: Real-time progress callbacks
 
-**Location:** `src/eidolon/analysis/`
-**Primary Responsibility:** Static code analysis using AST, metrics calculation, code smell detection
-
-**Key Components:**
-- `code_analyzer.py` - CodeAnalyzer class with AST parsing, complexity calculation, smell detection, subsystem identification
-- Data classes: ModuleInfo, FunctionInfo, ClassInfo, SubsystemInfo
-- `__init__.py` - Exports all analyzer components
-
-**Dependencies:**
-- **Inbound:** agents (orchestrator uses for code analysis)
-- **Outbound:** ast (Python stdlib), models (indirectly for structure)
-
-**Patterns Observed:**
-- Visitor pattern for AST traversal
-- Metric calculation (cyclomatic complexity, lines of code)
-- Heuristic-based code smell detection (long functions, high complexity, missing docstrings, god classes)
-- Subsystem clustering based on code organization
-
-**Confidence:** High (AST-based analysis is standard, implementation appears complete)
+### Issues
+- Progress tracking dict mutations not thread-safe
+- Hardcoded token estimates
+- JSON extraction fallback paths
 
 ---
 
-## Subsystem 6: planning
+## 3. Business Analyst
+
+**Location:** `src/eidolon/business_analyst.py`
+**Responsibility:** Requirements refinement and change planning
+
+### Key Components
+| File | Purpose | LOC |
+|------|---------|-----|
+| `business_analyst.py` | Multi-turn analysis with design tools | ~1200 |
+
+### Key Classes
+```python
+class BusinessAnalyst:
+    async def analyze_request(user_request, project_path, context) -> RequirementsAnalysis
+    async def interactive_analyze(initial_request, project_path, user_callback) -> RequirementsAnalysis
+```
+
+### Dependencies (Inbound)
+- `HierarchicalOrchestrator` (Phase 0.5)
+- API Layer (BA endpoint)
+
+### Dependencies (Outbound)
+- `LLMProvider`
+- `DesignContextToolHandler`
+- `SpecialistRegistry`
+- `CodeGraph` (optional)
+
+### Patterns Observed
+- **Multi-turn Conversation**: Up to 20 turns with tools
+- **Tool Calling**: Design context exploration
+- **Specialist Delegation**: Consults domain experts
+
+### Issues
+- Hardcoded turn limits (8, 20)
+- No conversation context windowing
+- Unknown tools silently handled
+
+---
+
+## 4. Specialist Agents
+
+**Location:** `src/eidolon/specialist_agents.py`, `src/eidolon/linting_agent.py`
+**Responsibility:** Domain-specific expert analysis
+
+### Key Components
+| File | Purpose | LOC |
+|------|---------|-----|
+| `specialist_agents.py` | 12 domain experts (Security, Testing, Database, etc.) | ~2200 |
+| `linting_agent.py` | Code quality with ruff, mypy, LLM fixes | ~500 |
+
+### Specialist Types
+1. SecurityEngineer - OWASP, vulnerabilities
+2. TestEngineer - Test pyramid, TDD
+3. DeploymentSpecialist - Docker, K8s, CI/CD
+4. FrontendSpecialist - React/Vue, accessibility
+5. DatabaseSpecialist - Schema, indexing
+6. APISpecialist - REST/GraphQL design
+7. DataSpecialist - Pipelines, ETL
+8. IntegrationSpecialist - Third-party APIs
+9. DiagnosticSpecialist - Debugging, profiling
+10. PerformanceSpecialist - Optimization
+11. PyTorchEngineer - ML models
+12. UXSpecialist - User experience
+
+### Dependencies (Inbound)
+- `BusinessAnalyst` (specialist consultation)
+- `HierarchicalOrchestrator` (quality checks)
+
+### Dependencies (Outbound)
+- `LLMProvider`
+- External tools: `ruff`, `mypy`
+
+### Patterns Observed
+- **Abstract Factory**: `create_default_registry()`
+- **Registry Pattern**: Domain-based specialist lookup
+- **Three-Stage Fixing** (Linting): Auto-fix → Type check → LLM fix
+
+### Issues
+- **HIGH**: JSON parsing duplicated 12 times
+- System prompts embedded (1000+ lines each)
+- No per-specialist rate limiting
+
+---
+
+## 5. Planning System
 
 **Location:** `src/eidolon/planning/`
-**Primary Responsibility:** Task decomposition and planning through 5-tier hierarchy
+**Responsibility:** Task decomposition with quality assurance
 
-**Key Components:**
-- `decomposition.py` - Decomposers for each level (System, Subsystem, Module, Class, Function)
-- `improved_decomposition.py` - Enhanced decomposition logic
-- `agent_selector.py` - Logic for selecting appropriate specialist agents
-- `prompt_templates.py` - LLM prompt templates for planning
-- `review_loop.py` - Review and feedback loop for plans
-- `__init__.py` - Exports all decomposers
+### Key Components
+| File | Purpose | LOC |
+|------|---------|-----|
+| `decomposition.py` | 5 decomposer classes | ~1100 |
+| `review_loop.py` | Agent negotiation | ~400 |
+| `prompt_templates.py` | Role-based prompts | ~560 |
+| `agent_selector.py` | Intelligent routing | ~360 |
+| `improved_decomposition.py` | JSON utilities | ~330 |
 
-**Dependencies:**
-- **Inbound:** agents (orchestrator uses for task planning)
-- **Outbound:** models (Task), llm_providers (for LLM-based planning)
+### Key Classes
+```python
+class SystemDecomposer, SubsystemDecomposer, ModuleDecomposer, ClassDecomposer
+class FunctionPlanner
+class ReviewLoop
+class IntelligentAgentSelector
+```
 
-**Patterns Observed:**
-- Strategy pattern for different decomposition levels
-- LLM-driven planning with structured prompts
-- Multi-level decomposition (System → Subsystem → Module → Class → Function)
-- Review loop for iterative improvement
-- Agent selection logic for specialization
+### Dependencies (Inbound)
+- `HierarchicalOrchestrator` (phases 1-4)
+- `BusinessAnalyst` (decomposition delegation)
 
-**Confidence:** High (comprehensive planning subsystem with clear hierarchy)
+### Dependencies (Outbound)
+- `LLMProvider`
+- `DesignContextToolHandler`
+- `CodeContextToolHandler`
+
+### Patterns Observed
+- **Strategy Pattern**: Different decomposers per tier
+- **Template Method**: Common decompose flow
+- **Decorator Pattern**: Review loop wraps decomposition
+- **Agent Negotiation**: Reviewer feedback cycles
+
+### Issues
+- Decomposer classes have near-identical structure (duplication)
+- max_turns hardcoded at 6
+- No cross-tier consistency validation
 
 ---
 
-## Subsystem 7: llm_providers
+## 6. Code Analysis
+
+**Location:** `src/eidolon/analysis/`, `src/eidolon/code_graph.py`, `src/eidolon/*_context_tools.py`
+**Responsibility:** Static code analysis and context provision
+
+### Key Components
+| File | Purpose | LOC |
+|------|---------|-----|
+| `analysis/code_analyzer.py` | AST-based analysis | ~510 |
+| `code_graph.py` | NetworkX graph analysis | ~650 |
+| `code_context_tools.py` | Code tool interface | ~440 |
+| `design_context_tools.py` | Architecture tools | ~560 |
+
+### Key Classes
+```python
+class CodeAnalyzer
+class CodeGraphAnalyzer
+class CodeGraph
+class CodeContextToolHandler
+class DesignContextToolHandler
+```
+
+### Tool Specifications
+**Code Context Tools (6):**
+- `get_function_definition`, `get_function_callers`, `get_function_callees`
+- `get_class_definition`, `get_module_overview`, `search_functions`
+
+**Design Context Tools (7):**
+- `get_existing_modules`, `analyze_module_pattern`, `search_similar_modules`
+- `get_subsystem_architecture`, `propose_design_option`
+- `request_requirement_clarification`, `get_dependency_constraints`
+
+### Dependencies (Inbound)
+- `BusinessAnalyst`, `FunctionPlanner` (context queries)
+- `AgentOrchestrator` (initial parsing)
+
+### Dependencies (Outbound)
+- `LLMProvider` (AI descriptions)
+- `networkx`
+
+### Patterns Observed
+- **Graph-based Analysis**: NetworkX call/import graphs
+- **Tool Calling**: On-demand context via LLM tools
+- **Visitor Pattern**: AST traversal
+
+### Issues
+- Import resolution heuristic-based (may miss cross-module calls)
+- Pattern detection too simple (keyword-based)
+- No circular dependency detection
+
+---
+
+## 7. LLM Providers
 
 **Location:** `src/eidolon/llm_providers/`
-**Primary Responsibility:** Multi-provider LLM abstraction layer
+**Responsibility:** Unified LLM API abstraction
 
-**Key Components:**
-- `__init__.py` (364 LOC!) - LLMProvider abstract base, AnthropicProvider, OpenAICompatibleProvider, create_provider factory
-- `mock_provider.py` - MockLLMProvider for testing without API calls
-- LLMResponse, LLMMessage data classes
+### Key Components
+| File | Purpose | LOC |
+|------|---------|-----|
+| `__init__.py` | Provider implementations | ~400 |
+| `mock_provider.py` | Testing mock | ~50 |
 
-**Dependencies:**
-- **Inbound:** agents (orchestrator uses for AI calls)
-- **Outbound:** anthropic SDK, openai SDK, os (env vars), logging_config
+### Key Classes
+```python
+class LLMProvider(ABC)
+class AnthropicProvider(LLMProvider)
+class OpenAICompatibleProvider(LLMProvider)
+class MockProvider(LLMProvider)
+```
 
-**Patterns Observed:**
-- Abstract base class pattern for provider interface
-- Factory pattern (create_provider) for instantiation
-- Adapter pattern for normalizing different provider APIs
-- Environment-based configuration
-- Unified response format across providers
-- OpenRouter-specific workarounds (sequential tool calls)
+### Supported Providers
+- Anthropic (claude-3-5-sonnet-20241022)
+- OpenAI-compatible (OpenRouter, Together.ai, Groq)
 
-**Supported Providers:**
-- Anthropic (Claude)
-- OpenAI (GPT-4, GPT-4 Turbo)
-- OpenRouter (any model via OpenAI-compatible API)
-- Together.ai, Groq, etc. (any OpenAI-compatible endpoint)
-- Mock (for testing)
+### Dependencies (Inbound)
+- All components requiring LLM inference
 
-**Confidence:** Very High (comprehensive, production-ready abstraction)
+### Dependencies (Outbound)
+- `anthropic` library
+- `openai` library
 
----
+### Patterns Observed
+- **Abstract Factory**: `create_provider()`
+- **Adapter Pattern**: Unified interface to different APIs
 
-## Subsystem 8: resilience
-
-**Location:** `src/eidolon/resilience/`
-**Primary Responsibility:** Reliability patterns (timeouts, retries, circuit breakers, rate limiting)
-
-**Key Components:**
-- `__init__.py` (377 LOC!) - CircuitBreaker, retry_with_backoff, with_timeout, RateLimiter
-- TimeoutConfig, RetryConfig dataclasses
-- Global instances: AI_API_BREAKER, GIT_OPERATIONS_BREAKER, DATABASE_BREAKER, AI_RATE_LIMITER
-
-**Dependencies:**
-- **Inbound:** agents (uses for AI API calls), potentially git_integration, storage
-- **Outbound:** asyncio, time, random (stdlib)
-
-**Patterns Observed:**
-- Circuit Breaker pattern (closed/half-open/open states)
-- Exponential backoff with jitter for retries
-- Token bucket rate limiting
-- Timeout wrappers for all async operations
-- Pre-configured global breakers for critical services
-- Transient error detection
-
-**Confidence:** Very High (production-grade reliability implementation)
+### Issues
+- OpenRouter special handling (sequential tool calls workaround)
+- No provider health checking
 
 ---
 
-## Subsystem 9: cache
+## 8. Storage & Models
+
+**Location:** `src/eidolon/storage/`, `src/eidolon/models/`
+**Responsibility:** Data persistence and domain models
+
+### Key Components
+| File | Purpose | LOC |
+|------|---------|-----|
+| `storage/database.py` | SQLite async operations | ~450 |
+| `models/card.py` | Card, CardIssue, CardMetrics | ~200 |
+| `models/__init__.py` | Agent, Task models | ~250 |
+| `db_pool.py` | Connection pooling | ~200 |
+
+### Key Classes
+```python
+class Database
+class Card, CardType, CardStatus, CardPriority, CardIssue, CardMetrics
+class Agent, AgentScope, AgentStatus
+class Task, TaskType, TaskStatus, TaskPriority
+```
+
+### Dependencies (Inbound)
+- API Layer (CRUD operations)
+- `AgentOrchestrator` (persistence)
+
+### Dependencies (Outbound)
+- `aiosqlite`
+
+### Patterns Observed
+- **Repository Pattern**: Database class abstracts persistence
+- **ID Generation**: Sequence-based unique IDs
+- **Dual-locking**: Transaction + cursor locks
+
+### Issues
+- JSON serialization overhead
+- Dual-locking complexity
+- No pagination support
+- Missing transaction management
+
+---
+
+## 9. Cache System
 
 **Location:** `src/eidolon/cache/`
-**Primary Responsibility:** Caching layer for analysis results
+**Responsibility:** Analysis result caching
 
-**Key Components:**
-- `cache_manager.py` - CacheManager class with get/set/invalidate, statistics, lifecycle management
-- `__init__.py` - Exports CacheManager
+### Key Components
+| File | Purpose | LOC |
+|------|---------|-----|
+| `cache_manager.py` | SHA256-based content cache | ~350 |
 
-**Dependencies:**
-- **Inbound:** agents (orchestrator uses for caching analysis results), health (cache health checks)
-- **Outbound:** hashlib, json, time (stdlib), likely file system for storage
+### Key Classes
+```python
+class CacheManager
+class CacheEntry
+class CacheStats
+```
 
-**Patterns Observed:**
-- Cache-aside pattern
-- Statistics tracking (hits, misses, hit rate)
-- TTL-based expiration (likely)
-- Content-based hashing for cache keys
-- Async initialization and operations
+### Dependencies (Inbound)
+- `AgentOrchestrator` (cache lookups)
+- API Layer (cache management endpoints)
 
-**Confidence:** High (standard caching implementation)
+### Dependencies (Outbound)
+- `aiosqlite`
 
----
+### Patterns Observed
+- **Content Addressing**: MD5(file + hash + scope + target)
+- **LRU Tracking**: Access counts for eviction
 
-## Subsystem 10: git_integration
-
-**Location:** `src/eidolon/git_integration/`
-**Primary Responsibility:** Git operations and change detection for incremental analysis
-
-**Key Components:**
-- `__init__.py` (197 LOC) - GitManager class, GitChanges dataclass
-- Operations: is_git_repo, get_changed_files, get_current_commit, get_current_branch, get_file_last_modified_commit
-
-**Dependencies:**
-- **Inbound:** agents (for incremental analysis mode)
-- **Outbound:** subprocess (git CLI), pathlib (stdlib)
-
-**Patterns Observed:**
-- Wrapper pattern for git CLI commands
-- Timeout protection on subprocess calls
-- File extension filtering for change detection
-- Categorized changes (modified, added, deleted, renamed)
-- Convenience method for Python files
-
-**Confidence:** High (complete git integration for incremental analysis)
+### Issues
+- No size bounds (can grow unbounded)
+- File hashing on every access (defeats caching for large files)
+- No transaction safety
 
 ---
 
-## Subsystem 11: health
+## 10. Resilience
 
-**Location:** `src/eidolon/health/`
-**Primary Responsibility:** Health check system for all components
+**Location:** `src/eidolon/resilience/`
+**Responsibility:** Fault tolerance patterns
 
-**Key Components:**
-- `__init__.py` (278 LOC) - HealthChecker class, ComponentHealth dataclass
-- Checks: database, cache, disk space, memory
-- Probe types: comprehensive health, readiness (K8s), liveness (K8s)
+### Key Components
+| File | Purpose | LOC |
+|------|---------|-----|
+| `__init__.py` | Circuit breaker, retry, rate limiting | ~350 |
 
-**Dependencies:**
-- **Inbound:** main.py (creates health checker, exposes /health endpoints)
-- **Outbound:** storage (Database), cache (CacheManager), psutil, shutil (stdlib)
+### Key Classes/Functions
+```python
+class CircuitBreaker
+class RateLimiter
+async def retry_with_backoff(func, *args, config=None)
+async def with_timeout(func, *args, timeout)
 
-**Patterns Observed:**
-- Health check pattern for distributed systems
-- Kubernetes probe compatibility (liveness, readiness)
-- Parallel health checks with asyncio.gather
-- Latency measurement for each check
-- Structured health responses with details
+# Global instances
+AI_API_BREAKER, GIT_OPERATIONS_BREAKER, DATABASE_BREAKER
+AI_RATE_LIMITER
+```
 
-**Confidence:** Very High (production-ready health monitoring)
+### Default Configuration
+- AI API: 90s timeout, 3 failures → circuit open, 2min recovery
+- Git: 30s timeout, 5 failures → circuit open, 1min recovery
+- Database: 5s timeout, 3 failures → circuit open, 30s recovery
+- Rate limit: 50 req/min, 40k tokens/min
 
----
+### Dependencies (Inbound)
+- All components making external calls
 
-## Subsystem 12: metrics
+### Dependencies (Outbound)
+- None (pure utility)
 
-**Location:** `src/eidolon/metrics/`
-**Primary Responsibility:** Prometheus metrics collection
+### Patterns Observed
+- **Circuit Breaker**: State machine (CLOSED → OPEN → HALF_OPEN)
+- **Exponential Backoff with Jitter**: Prevents thundering herd
+- **Token Bucket**: Rate limiting
 
-**Key Components:**
-- `__init__.py` (413 LOC) - Comprehensive Prometheus metrics, update_resource_metrics, get_metrics_response, convenience functions
-- Metric types: Counter, Histogram, Gauge, Info
-- Categories: Analysis, AI API, Circuit Breakers, Retries, Cache, Database, WebSocket, Git, Cards, Errors, Resources, HTTP
-
-**Dependencies:**
-- **Inbound:** main.py (/metrics endpoint), agents (records AI calls), storage (DB metrics), api (HTTP metrics), cache (cache metrics)
-- **Outbound:** prometheus-client, psutil
-
-**Patterns Observed:**
-- Prometheus exposition format
-- Metric labels for dimensionality (operation, status, type, etc.)
-- Resource usage tracking (CPU, memory, disk, file descriptors)
-- Context managers for timing (MetricsContext, track_analysis)
-- Convenience functions for common patterns
-
-**Confidence:** Very High (comprehensive production-grade metrics)
+### Issues
+- Circuit breaker not async-safe (race on failure_count)
+- Rate limiter token tracking fragile
+- No metrics integration
 
 ---
 
-## Subsystem 13: utils
+## 11. Metrics & Health
 
-**Location:** `src/eidolon/utils/`
-**Primary Responsibility:** Utility functions
+**Location:** `src/eidolon/metrics/`, `src/eidolon/health/`
+**Responsibility:** Observability and health probes
 
-**Key Components:**
-- `json_utils.py` - JSON serialization/deserialization utilities
-- `__init__.py` - Exports (currently minimal/empty)
+### Key Components
+| File | Purpose | LOC |
+|------|---------|-----|
+| `metrics/__init__.py` | Prometheus metrics | ~400 |
+| `health/__init__.py` | Health checker | ~200 |
 
-**Dependencies:**
-- **Inbound:** Various subsystems for JSON handling
-- **Outbound:** json (stdlib)
+### Key Metrics
+- Analysis: `eidolon_analyses_total`, `eidolon_analysis_duration_seconds`
+- AI API: `eidolon_ai_api_calls_total`, `eidolon_ai_api_tokens_total`, `eidolon_ai_api_latency_seconds`
+- Cache: `eidolon_cache_operations_total`, `eidolon_cache_hit_rate_percent`
+- Database: `eidolon_db_queries_total`, `eidolon_db_query_duration_seconds`
+- HTTP: `eidolon_http_requests_total`, `eidolon_http_request_duration_seconds`
+- Resources: `eidolon_process_cpu_percent`, `eidolon_process_memory_bytes`
 
-**Patterns Observed:**
-- Utility module pattern
-- Centralized JSON handling
+### Health Checks
+- `check_database()` - SELECT 1 with latency
+- `check_cache()` - Statistics retrieval
+- `check_disk_space()` - <10% free warning
+- `check_memory()` - >90% used warning
 
-**Confidence:** Medium (limited visibility, appears lightweight)
+### Dependencies (Inbound)
+- API Layer (health/metrics endpoints)
 
----
+### Dependencies (Outbound)
+- `prometheus_client`
+- `psutil`
 
-## Subsystem 14: Root-Level Modules
+### Patterns Observed
+- **Prometheus Integration**: Standard metric types
+- **Separated Probes**: Liveness vs Readiness
+- **Context Managers**: `track_analysis()`, `MetricsContext`
 
-**Location:** `src/eidolon/*.py` (not in subdirectories)
-**Primary Responsibility:** Cross-cutting concerns and specialized agents
-
-**Key Components:**
-- `main.py` - FastAPI application entrypoint, startup/shutdown lifecycle
-- `logging_config.py` - Structured logging configuration with structlog
-- `request_context.py` - Request tracking and analysis registry
-- `resource_limits.py` - Resource constraints and limits
-- `code_graph.py` - Code graph analysis and dependency tracking
-- `code_context_tools.py` - Code context extraction tools
-- `design_context_tools.py` - Design context tools (1 TODO)
-- `code_writer.py` - Code generation utilities
-- `specialist_agents.py` - Specialist agent implementations
-- `linting_agent.py` - Linting agent
-- `test_generator.py` - Test generation (2 TODOs)
-- `test_parallel.py` - Parallel testing utilities
-- `db_pool.py` - Database connection pooling
-
-**Dependencies:**
-- **Inbound:** main.py is the entrypoint; others are used by agents, api, etc.
-- **Outbound:** Various (models, storage, llm_providers, etc.)
-
-**Patterns Observed:**
-- Application composition pattern (main.py)
-- Cross-cutting concerns (logging, context tracking)
-- Specialist agents for specific tasks
-- Graph-based code analysis (networkx)
-- Tool implementations for LLM agents
-
-**Confidence:** Medium-High (visible files, but need deeper analysis for usage patterns)
+### Issues
+- Resource metrics sampled only at scrape time
+- Label cardinality risk on HTTP endpoints
+- Hardcoded health thresholds
 
 ---
 
-## Frontend Subsystem (Bonus)
+## 12. Frontend UI
 
-**Location:** `frontend/`
-**Primary Responsibility:** Vue 3 user interface
+**Location:** `frontend/src/`
+**Responsibility:** Vue 3 SPA for analysis interaction
 
-**Key Components:**
-- `src/main.js` - Vue app entry point
-- `src/App.vue` - Root component
-- `src/router/index.js` - Vue Router configuration
-- `src/stores/cardStore.js` - Pinia state management for cards
-- `src/views/` - ExploreView, CodeView, PlanView
-- `src/components/` - CardTile, AgentTree, TreeNode, LeftDock, RightDrawer, TopNav, AgentSnoop, NotificationSystem
-- `package.json` - Dependencies (Vue 3, Vite, Pinia, Axios)
+### Key Components
+| File | Purpose | LOC |
+|------|---------|-----|
+| `App.vue` | Root component, WebSocket setup | ~150 |
+| `stores/cardStore.js` | Pinia state management | ~300 |
+| `views/ExploreView.vue` | Main analysis view | ~450 |
+| `views/CodeView.vue` | Code changes view | ~150 |
+| `views/PlanView.vue` | Architecture planning | ~350 |
+| `components/CardTile.vue` | Card display | ~200 |
+| `components/RightDrawer.vue` | Card details panel | ~500 |
 
-**Dependencies:**
-- **Inbound:** User browser
-- **Outbound:** api (HTTP + WebSocket)
+### State Management
+```javascript
+// Pinia store state
+{
+  cards: [],              // All cards
+  agents: [],             // Agent hierarchy
+  selectedCard: null,     // Current detail card
+  isAnalyzing: false,     // Analysis in progress
+  analysisProgress: {},   // Module/function counts
+  cacheStats: {},         // Cache metrics
+  recentActivities: []    // Activity log (last 20)
+}
+```
 
-**Patterns Observed:**
-- Vue 3 Composition API
-- Component-based architecture
-- Centralized state management (Pinia)
-- Real-time updates via WebSocket
-- SPA routing
-- Card-based UI metaphor
+### Views
+1. **ExploreView** - Full analysis, issue promotion, filtering
+2. **CodeView** - Code changes and fix management
+3. **PlanView** - Architecture planning, BA feature generation
 
-**LOC:** ~3,039 lines (Vue + JS)
+### Dependencies (Inbound)
+- User interaction
 
-**Confidence:** High (complete MVP implementation for 3 tabs: Explore, Code, Plan)
+### Dependencies (Outbound)
+- Backend API (HTTP + WebSocket)
+
+### Patterns Observed
+- **Composition API**: Vue 3 setup() pattern
+- **Pinia State**: Centralized reactive state
+- **WebSocket Sync**: Real-time state updates
+- **Drag-and-Drop**: Card routing between views
+
+### Issues
+- Hard-coded WebSocket URL (localhost only)
+- Issue promotion logic duplicated
+- No WebSocket reconnection
+- No error boundaries
 
 ---
 
 ## Dependency Matrix
 
-### High-Level Dependencies (Simplified)
-
 ```
-Frontend
-  └─> api (REST + WebSocket)
-
-api
-  ├─> storage (Database)
-  ├─> agents (AgentOrchestrator)
-  └─> models (Card, Agent)
-
-agents (AgentOrchestrator)
-  ├─> models (Card, Agent)
-  ├─> storage (Database)
-  ├─> cache (CacheManager)
-  ├─> llm_providers (LLMProvider)
-  ├─> resilience (retry, timeout, circuit breaker, rate limiter)
-  ├─> analysis (CodeAnalyzer)
-  ├─> planning (Decomposers)
-  └─> git_integration (GitManager)
-
-analysis
-  └─> ast (stdlib)
-
-planning
-  ├─> models (Task)
-  └─> llm_providers (LLMProvider)
-
-llm_providers
-  ├─> anthropic SDK
-  ├─> openai SDK
-  └─> logging_config
-
-resilience
-  └─> asyncio, time, random (stdlib)
-
-cache
-  └─> hashlib, json, time (stdlib)
-
-storage
-  ├─> models (Card, Agent)
-  ├─> aiosqlite
-  └─> logging_config
-
-git_integration
-  └─> subprocess, pathlib (stdlib)
-
-health
-  ├─> storage (Database)
-  ├─> cache (CacheManager)
-  └─> psutil, shutil
-
-metrics
-  ├─> prometheus-client
-  └─> psutil
-
-main.py
-  ├─> storage (Database)
-  ├─> agents (AgentOrchestrator)
-  ├─> api (create_routes)
-  ├─> health (HealthChecker)
-  ├─> metrics (get_metrics_response)
-  ├─> logging_config
-  └─> request_context
+                       │ API │ Orch │ BA │ Spec │ Plan │ Anly │ LLM │ Store │ Cache │ Resil │ Metr │ FE │
+───────────────────────┼─────┼──────┼────┼──────┼──────┼──────┼─────┼───────┼───────┼───────┼──────┼────┤
+1. API Layer           │  -  │  →   │ →  │      │      │      │     │   →   │   →   │       │  →   │    │
+2. Agent Orchestration │  ←  │  -   │ →  │  →   │  →   │  →   │  →  │   →   │   →   │   →   │  →   │    │
+3. Business Analyst    │  ←  │  ←   │ -  │  →   │      │  →   │  →  │       │       │       │      │    │
+4. Specialist Agents   │     │  ←   │ ←  │  -   │      │      │  →  │       │       │       │      │    │
+5. Planning System     │     │  ←   │    │      │  -   │  →   │  →  │       │       │       │      │    │
+6. Code Analysis       │     │  ←   │ ←  │      │  ←   │  -   │  →  │       │       │       │      │    │
+7. LLM Providers       │     │  ←   │ ←  │  ←   │  ←   │  ←   │  -  │       │       │       │      │    │
+8. Storage & Models    │  ←  │  ←   │    │      │      │      │     │   -   │       │       │      │    │
+9. Cache System        │  ←  │  ←   │    │      │      │      │     │       │   -   │       │      │    │
+10. Resilience         │     │  ←   │    │      │      │      │     │       │       │   -   │      │    │
+11. Metrics & Health   │  ←  │  ←   │    │      │      │      │     │       │       │       │  -   │    │
+12. Frontend UI        │  →  │      │    │      │      │      │     │       │       │       │      │ -  │
 ```
 
----
-
-## Subsystem Coupling Analysis
-
-### Low Coupling (Good)
-- **analysis** - Only depends on stdlib (ast)
-- **resilience** - Only depends on stdlib
-- **cache** - Minimal dependencies
-- **git_integration** - Only depends on stdlib
-
-### Medium Coupling (Acceptable)
-- **llm_providers** - 2 external SDKs + logging
-- **storage** - models + aiosqlite + logging
-- **health** - 2 internal + 2 external deps
-- **planning** - models + llm_providers
-
-### High Coupling (Expected for Orchestrators)
-- **agents** - 8+ dependencies (orchestration hub)
-- **api** - 3-4 dependencies (API gateway)
-- **main.py** - 6+ dependencies (application composition)
-
-**Overall:** Clean architecture with appropriate coupling levels. Core libraries (analysis, resilience, cache) are decoupled, while orchestrators naturally have higher coupling.
+Legend: `→` = depends on, `←` = depended on by, `-` = self
 
 ---
 
-## Dead/Unused Code Candidates
+## Confidence Level: HIGH
 
-Based on file names and TODO markers:
-
-1. **test_parallel.py** - May be experimental/prototype (requires validation)
-2. **design_context_tools.py** - Has 1 TODO (incomplete?)
-3. **test_generator.py** - Has 2 TODOs (incomplete?)
-
-**Note:** Actual usage requires runtime analysis or dependency graph tool.
-
----
-
-## Architectural Observations
-
-### Strengths
-✅ **Clear separation of concerns** - Each subsystem has well-defined responsibility
-✅ **Layered architecture** - Frontend → API → Orchestration → Business Logic → Infrastructure
-✅ **Provider abstractions** - LLM providers are swappable
-✅ **Production-ready patterns** - Resilience, health checks, metrics
-✅ **Async throughout** - Proper async/await usage
-✅ **Type safety** - Pydantic models everywhere
-✅ **Observability** - Comprehensive logging, metrics, health checks
-
-### Potential Improvements
-⚠️ **Documentation mismatch** - Code references Eidolon, docs reference MONAD
-⚠️ **Test coverage unknown** - Need pytest-cov to measure
-⚠️ **Integration tests missing** - Only unit tests exist
-⚠️ **Frontend incomplete** - 3/6 planned tabs (MVP acceptable)
-
----
-
-## Summary
-
-**Total Subsystems Analyzed:** 14 backend + 1 frontend = 15 total
-
-**Architecture Quality:** High - Well-organized, low coupling, clear responsibilities
-
-**Code Maturity:** Production-ready backend, MVP-complete frontend
-
-**Refactor vs Restart Decision:** **REFACTOR** - Code quality is excellent, architecture is sound. No justification for rewrite. Focus on completing features, adding tests, and updating documentation.
-
----
-
-**Confidence in Analysis:** Very High
-**Next Steps:** Code quality assessment → Architecture diagrams → Final report → Architect handover
+All subsystems analyzed via direct code reading and cross-referencing. Patterns identified through structure and naming convention analysis.

@@ -32,6 +32,7 @@ class FakeOrchestrator:
         self.analyzed_paths = []
         self.incremental_calls = []
         self.activity_callback = None
+        self.llm_provider = None  # Added for BusinessAnalyst initialization
 
     async def analyze_codebase(self, path: str):
         self.analyzed_paths.append(path)

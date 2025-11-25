@@ -42,14 +42,19 @@ app = FastAPI(
     version="0.1.0"
 )
 
-# CORS middleware
+# CORS middleware - origins from environment
+cors_origins_str = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000")
+cors_origins = [origin.strip() for origin in cors_origins_str.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+logger.info("cors_configured", origins=cors_origins)
 
 # Global instances
 db: Database = None

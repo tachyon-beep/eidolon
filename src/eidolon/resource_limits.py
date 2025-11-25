@@ -253,21 +253,26 @@ class ResourceValidator:
         Returns:
             Dict with memory stats
         """
+        stats = {
+            'process_memory_mb': None,
+            'process_memory_limit_mb': ResourceLimits.MAX_MEMORY_PER_ANALYSIS_MB,
+            'system_memory_percent': None,
+            'system_memory_limit_percent': ResourceLimits.MAX_MEMORY_PERCENT,
+            'system_memory_available_mb': None
+        }
+
         try:
             process = psutil.Process()
             process_memory = process.memory_info()
             system_memory = psutil.virtual_memory()
 
-            return {
-                'process_memory_mb': process_memory.rss / (1024 * 1024),
-                'process_memory_limit_mb': ResourceLimits.MAX_MEMORY_PER_ANALYSIS_MB,
-                'system_memory_percent': system_memory.percent,
-                'system_memory_limit_percent': ResourceLimits.MAX_MEMORY_PERCENT,
-                'system_memory_available_mb': system_memory.available / (1024 * 1024)
-            }
+            stats['process_memory_mb'] = process_memory.rss / (1024 * 1024)
+            stats['system_memory_percent'] = system_memory.percent
+            stats['system_memory_available_mb'] = system_memory.available / (1024 * 1024)
         except Exception as e:
             logger.warning("memory_stats_failed", error=str(e))
-            return {}
+
+        return stats
 
 
 # Convenience decorator for resource validation

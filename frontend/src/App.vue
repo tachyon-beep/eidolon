@@ -36,10 +36,28 @@ provide('notify', {
 })
 
 let ws = null
+let reconnectAttempts = 0
+const maxReconnectAttempts = 10
+const baseReconnectDelay = 1000 // 1 second
 
-onMounted(() => {
-  // Connect to WebSocket for real-time updates
-  ws = new WebSocket('ws://localhost:8000/api/ws')
+// Construct WebSocket URL from current location
+function getWebSocketUrl() {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const host = window.location.hostname
+  const port = import.meta.env.VITE_API_PORT || '8000'
+  return `${protocol}//${host}:${port}/api/ws`
+}
+
+function connectWebSocket() {
+  const wsUrl = getWebSocketUrl()
+  console.log(`[WebSocket] Connecting to ${wsUrl}`)
+
+  ws = new WebSocket(wsUrl)
+
+  ws.onopen = () => {
+    console.log('[WebSocket] Connected')
+    reconnectAttempts = 0 // Reset on successful connection
+  }
 
   ws.onmessage = (event) => {
     const message = JSON.parse(event.data)
@@ -47,8 +65,27 @@ onMounted(() => {
   }
 
   ws.onerror = (error) => {
-    console.error('WebSocket error:', error)
+    console.error('[WebSocket] Error:', error)
   }
+
+  ws.onclose = (event) => {
+    console.log(`[WebSocket] Closed (code: ${event.code})`)
+
+    // Attempt reconnection with exponential backoff
+    if (reconnectAttempts < maxReconnectAttempts) {
+      const delay = baseReconnectDelay * Math.pow(2, reconnectAttempts)
+      reconnectAttempts++
+      console.log(`[WebSocket] Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${maxReconnectAttempts})`)
+      setTimeout(connectWebSocket, delay)
+    } else {
+      console.error('[WebSocket] Max reconnection attempts reached')
+    }
+  }
+}
+
+onMounted(() => {
+  // Connect to WebSocket for real-time updates
+  connectWebSocket()
 
   // Load initial data
   cardStore.fetchCards()
@@ -56,6 +93,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  reconnectAttempts = maxReconnectAttempts // Prevent reconnection on unmount
   if (ws) {
     ws.close()
   }

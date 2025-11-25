@@ -67,6 +67,8 @@ class CircuitBreaker:
 
     Prevents repeated calls to failing services by "opening" after threshold failures.
     Automatically attempts recovery after timeout period.
+
+    Thread-safe: Uses asyncio.Lock to protect state transitions.
     """
 
     def __init__(self,
@@ -82,6 +84,7 @@ class CircuitBreaker:
         self.failure_count = 0
         self.last_failure_time: Optional[float] = None
         self.state = CircuitState.CLOSED
+        self._lock = asyncio.Lock()  # Protect state transitions
 
     def _should_attempt_reset(self) -> bool:
         """Check if enough time has passed to attempt recovery"""
@@ -106,53 +109,60 @@ class CircuitBreaker:
             CircuitBreakerError: If circuit is open
             Exception: Original exception from func if not retryable
         """
-        # Check if we should attempt reset
-        if self._should_attempt_reset():
-            self.state = CircuitState.HALF_OPEN
-            print(f"[CircuitBreaker:{self.name}] Attempting recovery (HALF_OPEN)", file=sys.stderr)
+        # Acquire lock for state check and potential transition
+        async with self._lock:
+            # Check if we should attempt reset
+            if self._should_attempt_reset():
+                self.state = CircuitState.HALF_OPEN
+                print(f"[CircuitBreaker:{self.name}] Attempting recovery (HALF_OPEN)", file=sys.stderr)
 
-        # Reject if circuit is open
-        if self.state == CircuitState.OPEN:
-            print(
-                f"[CircuitBreaker:{self.name}] OPEN - rejecting request "
-                f"(failures: {self.failure_count}/{self.failure_threshold})",
-                file=sys.stderr
-            )
-            raise CircuitBreakerError(
-                f"Circuit breaker '{self.name}' is OPEN. "
-                f"Service unavailable. Will retry after {self.recovery_timeout}s"
-            )
+            # Reject if circuit is open
+            if self.state == CircuitState.OPEN:
+                print(
+                    f"[CircuitBreaker:{self.name}] OPEN - rejecting request "
+                    f"(failures: {self.failure_count}/{self.failure_threshold})",
+                    file=sys.stderr
+                )
+                raise CircuitBreakerError(
+                    f"Circuit breaker '{self.name}' is OPEN. "
+                    f"Service unavailable. Will retry after {self.recovery_timeout}s"
+                )
 
+            # Capture current state before releasing lock for execution
+            current_state = self.state
+
+        # Execute function outside the lock (allows concurrent calls when CLOSED)
         try:
-            # Execute function
             result = await func(*args, **kwargs)
 
-            # Success - reset if we were testing recovery
-            if self.state == CircuitState.HALF_OPEN:
-                self.state = CircuitState.CLOSED
-                self.failure_count = 0
-                print(f"[CircuitBreaker:{self.name}] Recovered (CLOSED)", file=sys.stderr)
+            # Success - update state under lock
+            async with self._lock:
+                if current_state == CircuitState.HALF_OPEN:
+                    self.state = CircuitState.CLOSED
+                    self.failure_count = 0
+                    print(f"[CircuitBreaker:{self.name}] Recovered (CLOSED)", file=sys.stderr)
 
             return result
 
         except self.expected_exception as e:
-            # Failure - increment counter
-            self.failure_count += 1
-            self.last_failure_time = time.time()
+            # Failure - update state under lock
+            async with self._lock:
+                self.failure_count += 1
+                self.last_failure_time = time.time()
 
-            print(
-                f"[CircuitBreaker:{self.name}] Failure {self.failure_count}/{self.failure_threshold}: {str(e)[:100]}",
-                file=sys.stderr
-            )
-
-            # Open circuit if threshold reached
-            if self.failure_count >= self.failure_threshold:
-                self.state = CircuitState.OPEN
                 print(
-                    f"[CircuitBreaker:{self.name}] OPENED - too many failures "
-                    f"(recovery in {self.recovery_timeout}s)",
+                    f"[CircuitBreaker:{self.name}] Failure {self.failure_count}/{self.failure_threshold}: {str(e)[:100]}",
                     file=sys.stderr
                 )
+
+                # Open circuit if threshold reached
+                if self.failure_count >= self.failure_threshold:
+                    self.state = CircuitState.OPEN
+                    print(
+                        f"[CircuitBreaker:{self.name}] OPENED - too many failures "
+                        f"(recovery in {self.recovery_timeout}s)",
+                        file=sys.stderr
+                    )
 
             raise
 

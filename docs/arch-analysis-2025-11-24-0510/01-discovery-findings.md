@@ -1,370 +1,245 @@
-# Discovery Findings - Eidolon Codebase Analysis
-
-**Analysis Date:** 2025-11-24
-**Analyst:** System Archaeologist
-**Codebase:** Eidolon (formerly MONAD)
-**Workspace:** docs/arch-analysis-2025-11-24-0510/
+# Eidolon Architecture Discovery Findings
 
 ## Executive Summary
 
-Eidolon is a **well-structured, production-ready hierarchical AI agent system** that has undergone recent reorganization from `backend/` to `src/eidolon/` package structure. The codebase consists of **~20,780 LOC** (excluding tests) with **remarkably low technical debt** (only 4 TODO/FIXME markers).
+Eidolon is a **hierarchical AI agent-based code analysis and generation system** with a Python/FastAPI backend and Vue 3 frontend. The system breaks down user requests through a multi-tier hierarchy (System → Subsystem → Module → Class → Function), executes them with LLM assistance, and generates code with quality checks.
 
-**Key Finding:** This is **mature, functional code** with minimal aspirational/dead code. The architecture is sound but documentation is **significantly outdated** due to the MONAD→Eidolon rename.
-
-## Project Identity
-
-### Name Evolution
-- **Old Name:** MONAD (Monadic Autonomous Network for Adaptive Development)
-- **Current Name:** Eidolon
-- **Problem:** All documentation (README.md, ARCHITECTURE.md, MVP_SUMMARY.md) still references "MONAD"
-- **Impact:** Documentation-code mismatch creates confusion
-
-### Version
-- **Current:** 0.1.0 (MVP phase)
-- **Status:** Feature-complete MVP, production-ready backend, functional frontend
-
-## Codebase Statistics
-
-### Backend (Python)
-- **Location:** `src/eidolon/`
-- **Files:** 46 Python files
-- **Lines of Code:** ~17,741 LOC
-- **Subsystems:** 14 identified subsystems
-- **Test Coverage:** 17 unit test files in `tests/`
-- **TODO/FIXME Count:** 4 (0.02% - exceptionally low)
-- **Python Version:** 3.10+
-
-### Frontend (Vue 3)
-- **Location:** `frontend/`
-- **Files:** 15 Vue/JS files
-- **Lines of Code:** ~3,039 LOC
-- **Framework:** Vue 3 + Vite
-- **State Management:** Pinia
-- **Status:** Fully implemented (not skeletal)
-
-### Total System
-- **Combined LOC:** ~20,780 (excluding tests)
-- **Quality:** High - clean structure, low debt, well-typed
+**Key Statistics:**
+| Metric | Value |
+|--------|-------|
+| Python Files | 46 |
+| Python LOC | ~18,300 |
+| Frontend Files | ~12 Vue components |
+| Total Subsystems | 12 identified |
+| Architecture Style | Multi-tier hierarchical agent orchestration |
 
 ## Technology Stack
 
-### Backend Stack
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| FastAPI | 0.115.0 | Web framework |
-| Uvicorn | 0.32.0 | ASGI server |
-| Anthropic SDK | 0.39.0 | Claude API integration |
-| OpenAI SDK | 1.58.1 | OpenAI/OpenRouter integration |
-| Pydantic | 2.10.5 | Data validation |
-| aiosqlite | 0.20.0 | Async SQLite |
-| structlog | 24.4.0 | Structured logging |
-| prometheus-client | 0.21.0 | Metrics |
-| psutil | 6.1.0 | System metrics |
-| networkx | 3.2.1+ | Graph analysis |
+### Backend
+- **Framework**: FastAPI (0.115.0)
+- **Language**: Python 3.10+
+- **Database**: SQLite with aiosqlite (async)
+- **LLM Providers**: Anthropic Claude, OpenAI-compatible (OpenRouter)
+- **Graph Analysis**: NetworkX
+- **Validation**: Pydantic v2
+- **Observability**: Prometheus metrics, structured logging (structlog)
+- **Process Monitoring**: psutil
 
-### Frontend Stack
-- Vue 3 (Composition API)
-- Vite (build tool)
-- Pinia (state management)
-- WebSocket client
+### Frontend
+- **Framework**: Vue 3 + Composition API
+- **Build Tool**: Vite
+- **State Management**: Pinia
+- **HTTP Client**: Axios
+- **Real-time**: Native WebSocket API
+- **Routing**: Vue Router (history mode)
 
-### Build System
-- **Package Manager:** `uv` (modern Python package manager)
-- **Build Backend:** hatchling
-- **Config:** `pyproject.toml` (modern Python standard)
-- **Migration:** Recently migrated from `requirements.txt` to `pyproject.toml`
+### Infrastructure
+- **Package Manager**: uv (Python), npm (Frontend)
+- **Testing**: pytest, pytest-asyncio
+- **Linting**: ruff, mypy
 
-## Directory Structure
+## Project Organization
 
-### Current Structure
 ```
 eidolon/
-├── src/eidolon/              # Backend package (NEW)
-│   ├── agents/               # Orchestration & hierarchy
-│   ├── analysis/             # Code analysis (AST, metrics)
-│   ├── api/                  # FastAPI routes & WebSocket
-│   ├── cache/                # Caching layer
-│   ├── git_integration/      # Git operations
-│   ├── health/               # Health check endpoints
-│   ├── llm_providers/        # LLM abstraction layer
-│   ├── metrics/              # Prometheus metrics
-│   ├── models/               # Data models (Card, Agent, Task)
-│   ├── planning/             # Task decomposition & planning
-│   ├── resilience/           # Retry, timeout, circuit breaker
-│   ├── storage/              # SQLite database layer
-│   ├── utils/                # Utilities
-│   ├── main.py               # FastAPI application entrypoint
-│   ├── logging_config.py     # Logging configuration
-│   ├── request_context.py    # Request tracking
-│   ├── resource_limits.py    # Resource constraints
-│   ├── code_graph.py         # Code graph analysis
-│   ├── code_context_tools.py # Code context extraction
-│   ├── design_context_tools.py # Design context tools
-│   ├── code_writer.py        # Code generation
-│   ├── specialist_agents.py  # Specialist agent implementations
-│   ├── linting_agent.py      # Linting agent
-│   ├── test_generator.py     # Test generation
-│   ├── test_parallel.py      # Parallel testing
-│   └── db_pool.py            # Database connection pooling
-├── frontend/                 # Vue 3 frontend
-│   ├── src/
-│   │   ├── components/       # Vue components (9 files)
-│   │   ├── views/            # Page views (3 files)
-│   │   ├── stores/           # Pinia stores
-│   │   └── router/           # Vue Router
-│   ├── index.html
-│   ├── package.json
-│   └── vite.config.js
-├── tests/                    # Unit tests (NEW - 17 files)
-├── examples/                 # Sample code for demos
-├── docs/                     # Documentation
-│   ├── ARCHITECTURE.md       # Technical architecture (OUTDATED)
-│   └── MVP_SUMMARY.md        # MVP summary (OUTDATED)
-├── pyproject.toml            # Modern Python config (NEW)
-├── uv.lock                   # Dependency lock file (NEW)
-├── README.md                 # Project README (OUTDATED)
-└── AGENTS.md                 # Agent guidelines (OUTDATED)
+├── src/eidolon/           # Backend Python package
+│   ├── agents/            # Agent orchestration
+│   ├── analysis/          # Code analysis (AST-based)
+│   ├── api/               # FastAPI routes
+│   ├── cache/             # Result caching
+│   ├── git_integration/   # Git diff analysis
+│   ├── health/            # Health probes
+│   ├── llm_providers/     # LLM provider abstraction
+│   ├── metrics/           # Prometheus metrics
+│   ├── models/            # Pydantic domain models
+│   ├── planning/          # Decomposition & review loops
+│   ├── resilience/        # Retry, circuit breaker, rate limiting
+│   ├── storage/           # SQLite persistence
+│   ├── utils/             # Utilities
+│   ├── orchestrator.py    # HierarchicalOrchestrator (code gen)
+│   ├── business_analyst.py # Requirements refinement
+│   ├── specialist_agents.py # Domain expert agents (12 types)
+│   ├── linting_agent.py   # Code quality (ruff, mypy, LLM fixes)
+│   ├── code_graph.py      # NetworkX code graph
+│   ├── code_context_tools.py # LLM tool calling interface
+│   ├── design_context_tools.py # Architecture exploration tools
+│   ├── code_writer.py     # File writing with backups
+│   └── test_generator.py  # Test generation
+├── frontend/src/          # Vue 3 SPA
+│   ├── components/        # 8 Vue components
+│   ├── views/             # 3 views (Explore, Code, Plan)
+│   ├── stores/            # Pinia state
+│   └── router/            # Vue Router config
+├── tests/                 # pytest test suite
+│   └── integration/       # LLM-gated tests
+└── docs/                  # Documentation
 ```
 
-### Deleted Structure (Recent Migration)
+## Architectural Patterns Identified
+
+### 1. Hierarchical Decomposition Pattern
+User requests are broken down through 5 tiers:
 ```
-backend/                      # DELETED (migrated to src/eidolon/)
-  ├── models/                 # → src/eidolon/models/
-  ├── agents/                 # → src/eidolon/agents/
-  ├── analysis/               # → src/eidolon/analysis/
-  ├── api/                    # → src/eidolon/api/
-  ├── storage/                # → src/eidolon/storage/
-  ├── planning/               # → src/eidolon/planning/
-  ├── cache/                  # → src/eidolon/cache/
-  ├── git_integration/        # → src/eidolon/git_integration/
-  ├── health/                 # → src/eidolon/health/
-  ├── llm_providers/          # → src/eidolon/llm_providers/
-  ├── metrics/                # → src/eidolon/metrics/
-  ├── resilience/             # → src/eidolon/resilience/
-  ├── utils/                  # → src/eidolon/utils/
-  ├── main.py                 # → src/eidolon/main.py
-  └── requirements.txt        # → pyproject.toml dependencies
+User Request → System → Subsystem → Module → Class/Function → Code
 ```
 
-## Identified Subsystems (14 Total)
+### 2. Agent Negotiation Pattern (Review Loops)
+- Primary agent generates output
+- Reviewer agent critiques with score (0-100)
+- Revision cycle until quality threshold met
 
-### Core Subsystems
-1. **agents** - Agent orchestration and hierarchical deployment
-2. **models** - Data models (Card, Agent, Task with full schemas)
-3. **storage** - SQLite database layer with async operations
-4. **api** - FastAPI routes and WebSocket endpoints
+### 3. Tool Calling Pattern
+- LLMs can request code context via structured tool calls
+- CodeContextToolHandler and DesignContextToolHandler provide on-demand context
 
-### Analysis & Intelligence
-5. **analysis** - Code analysis (AST parsing, metrics, smells)
-6. **planning** - Task decomposition, agent selection, prompts
-7. **llm_providers** - Multi-provider LLM abstraction (Anthropic, OpenAI, OpenRouter)
+### 4. Resilience Patterns (Production-Grade)
+- Circuit breaker (fail-fast after threshold)
+- Exponential backoff with jitter
+- Rate limiting (token bucket)
+- Timeout enforcement
 
-### Infrastructure & Reliability
-8. **resilience** - Retry logic, timeouts, circuit breakers, rate limiting
-9. **cache** - Caching layer for analysis results
-10. **health** - Health check endpoints (liveness, readiness)
-11. **metrics** - Prometheus metrics collection
+### 5. Event-Driven UI Updates
+- WebSocket broadcasts state changes
+- Pinia store synchronizes client state
+- Vue reactivity handles re-renders
 
-### Integration & Utilities
-12. **git_integration** - Git operations and change detection
-13. **utils** - Utility functions (JSON utils, etc.)
-14. **Root-level modules** - logging_config, request_context, resource_limits, etc.
+## Identified Subsystems (12)
 
-## Entry Points
+| # | Subsystem | Location | Primary Responsibility |
+|---|-----------|----------|----------------------|
+| 1 | API Layer | `api/`, `main.py` | HTTP/WebSocket endpoints |
+| 2 | Agent Orchestration | `orchestrator.py`, `agents/` | Hierarchical agent coordination |
+| 3 | Business Analyst | `business_analyst.py` | Requirements refinement |
+| 4 | Specialist Agents | `specialist_agents.py`, `linting_agent.py` | Domain expert analysis |
+| 5 | Planning System | `planning/` | Task decomposition |
+| 6 | Code Analysis | `analysis/`, `code_graph.py`, `*_context_tools.py` | AST parsing, code graph |
+| 7 | LLM Providers | `llm_providers/` | Multi-provider abstraction |
+| 8 | Storage & Models | `storage/`, `models/` | Persistence, domain models |
+| 9 | Cache System | `cache/` | Result caching |
+| 10 | Resilience | `resilience/` | Fault tolerance patterns |
+| 11 | Metrics & Health | `metrics/`, `health/` | Observability |
+| 12 | Frontend UI | `frontend/src/` | Vue 3 SPA |
 
-### Backend Entry Point
-- **File:** `src/eidolon/main.py`
-- **Type:** FastAPI application
-- **Startup:**
-  - Initializes SQLite database (`monad.db`)
-  - Creates AgentOrchestrator
-  - Initializes health checker
-  - Sets up CORS middleware
-  - Includes API routes at `/api`
-- **Endpoints:**
-  - `GET /` - Root endpoint
-  - `GET /health` - Comprehensive health check
-  - `GET /health/ready` - Readiness probe
-  - `GET /health/live` - Liveness probe
-  - `GET /metrics` - Prometheus metrics
-  - `/api/*` - API routes (cards, agents, analysis, WebSocket)
+## Critical Dependencies
 
-### Frontend Entry Point
-- **File:** `frontend/src/main.js`
-- **Framework:** Vue 3 with Composition API
-- **Router:** Vue Router with 3 tab views (Explore, Code, Plan)
-- **State:** Pinia store for cards and agents
+```
+HierarchicalOrchestrator
+├── BusinessAnalyst
+├── SystemDecomposer → SubsystemDecomposer → ModuleDecomposer → FunctionPlanner
+├── CodeGraphAnalyzer → CodeContextToolHandler
+├── LintingAgent
+└── LLMProvider (via resilience wrappers)
 
-### Development Commands
-```bash
-# Backend
-uv sync                                    # Install dependencies
-uv run uvicorn eidolon.main:app --reload  # Run dev server
-
-# Frontend
-cd frontend && npm install                 # Install dependencies
-npm run dev                                # Run dev server
+AgentOrchestrator (Analysis)
+├── CodeAnalyzer
+├── Database
+├── CacheManager
+├── LLMProvider (with circuit breaker, rate limiter)
+└── SpecialistRegistry (12 specialists)
 ```
 
-## Code Quality Indicators
+## Key Data Flows
 
-### Positive Indicators (Strong)
-✅ **Very low TODO/FIXME count (4 total)** - Code is implemented, not aspirational
-✅ **Comprehensive type hints** - Pydantic models, typed function signatures
-✅ **Structured logging** - Uses structlog throughout
-✅ **Resilience patterns** - Circuit breakers, retries, timeouts, rate limiting
-✅ **Clear separation of concerns** - Subsystems are well-defined
-✅ **Proper package structure** - Modern `src/` layout
-✅ **Test coverage exists** - 17 unit tests in dedicated `tests/` directory
-✅ **Health and metrics** - Production-ready observability
-
-### Negative Indicators (Moderate)
-⚠️ **Documentation-code mismatch** - All docs reference "MONAD", code is "Eidolon"
-⚠️ **Database name mismatch** - Creates `monad.db`, should be `eidolon.db`
-⚠️ **No integration tests** - Only unit tests present
-⚠️ **Frontend views incomplete** - MVP implements 3/6 planned tabs (Explore, Code, Plan)
-⚠️ **Single database file** - SQLite in working directory (MVP acceptable)
-
-### Dead/Aspirational Code Analysis
-🔍 **TODO/FIXME Locations:**
-1. `src/eidolon/test_generator.py` - 2 TODOs
-2. `src/eidolon/design_context_tools.py` - 1 TODO
-3. `src/eidolon/planning/decomposition.py` - 1 TODO
-
-**Conclusion:** Only 4 TODOs across ~17,741 LOC = **0.02% aspirational markers**. This is exceptionally low, indicating **minimal dead/aspirational code**.
-
-### Unused Files
-Potential candidates for removal (require deeper analysis):
-- `test_parallel.py` - May be experiment/prototype
-- `business_analyst.py` (if it exists) - Referenced in docs but may be deleted
-
-## Architecture Patterns Observed
-
-### Design Patterns
-1. **Hierarchical Agent Pattern** - System → Module → Function agent deployment
-2. **Repository Pattern** - Database layer abstracts SQLite operations
-3. **Provider Pattern** - LLM provider abstraction supports multiple backends
-4. **Circuit Breaker Pattern** - Resilience module implements fault tolerance
-5. **Observer Pattern** - WebSocket for real-time updates
-6. **Card-Based Work Items** - Everything is a card (Review, Change, Architecture, etc.)
-
-### Architectural Layers
+### 1. Analysis Flow
 ```
-┌─────────────────────────────────────┐
-│  Frontend (Vue 3)                   │
-│  - Views (Explore, Code, Plan)      │
-│  - Components (CardTile, AgentTree) │
-│  - Pinia Stores                     │
-└─────────────────────────────────────┘
-            │ HTTP/WebSocket
-┌─────────────────────────────────────┐
-│  API Layer (FastAPI)                │
-│  - REST endpoints                   │
-│  - WebSocket broadcasts             │
-└─────────────────────────────────────┘
-            │
-┌─────────────────────────────────────┐
-│  Orchestration Layer                │
-│  - AgentOrchestrator                │
-│  - Hierarchical deployment          │
-│  - LLM provider abstraction         │
-└─────────────────────────────────────┘
-            │
-┌─────────────────────────────────────┐
-│  Business Logic                     │
-│  - Code Analysis (AST, metrics)     │
-│  - Planning & Decomposition         │
-│  - Agent specialization             │
-└─────────────────────────────────────┘
-            │
-┌─────────────────────────────────────┐
-│  Infrastructure                     │
-│  - Storage (SQLite)                 │
-│  - Cache                            │
-│  - Resilience (retry, circuit)      │
-│  - Metrics & Health                 │
-└─────────────────────────────────────┘
+HTTP POST /api/analyze → AgentOrchestrator.analyze_codebase()
+  → CodeAnalyzer parses files
+  → Build call graph
+  → Deploy agents (parallel, semaphore-controlled)
+  → LLM analysis per function
+  → Create Cards (issues)
+  → Persist to Database
+  → WebSocket broadcast progress
+  → Return hierarchy
 ```
 
-## Dependencies Analysis
+### 2. Code Generation Flow
+```
+User Request → BusinessAnalyst.analyze_request()
+  → DesignContextTools exploration (multi-turn)
+  → RequirementsAnalysis output
+  → SystemDecomposer (+ ReviewLoop)
+  → ... recursive decomposition ...
+  → FunctionPlanner.generate_implementation()
+  → LintingAgent.lint_and_fix()
+  → Write to file (with backup)
+```
 
-### External Dependencies (Backend)
-- **Total:** 13 runtime dependencies (lean)
-- **No security vulnerabilities detected** (based on recent versions)
-- **Well-maintained packages** (FastAPI, Anthropic, OpenAI, etc.)
+### 3. Frontend State Flow
+```
+API response / WebSocket message
+  → cardStore.handleWebSocketMessage()
+  → Pinia state updates
+  → Vue reactivity
+  → Component re-render
+```
 
-### Internal Dependencies
-- **Low coupling** - Subsystems are largely independent
-- **Clear interfaces** - Models exported via `__init__.py`
-- **No circular dependencies detected**
+## Quality & Technical Debt Observations
 
-## Recent Changes (Git History)
+### Strengths
+1. **Well-structured hierarchical design** - Clear tier separation
+2. **Production resilience patterns** - Circuit breaker, retries, rate limiting
+3. **Comprehensive observability** - Prometheus metrics, health probes
+4. **Clean LLM abstraction** - Multi-provider support with unified interface
+5. **Tool calling for context** - Token-efficient on-demand context fetching
 
-Based on git status and recent commits:
-1. **Migration to src/ layout** - Deleted entire `backend/` directory
-2. **Migration to uv** - Added `pyproject.toml`, `uv.lock`
-3. **Test restructuring** - Created dedicated `tests/` directory
-4. **OpenRouter integration fixes** - Recent commits fixing tool call handling
-5. **Diagnostic tests added** - Testing tool call message formatting
+### Technical Debt & Issues
 
-## Confidence Levels
+| Category | Issue | Severity | Location |
+|----------|-------|----------|----------|
+| **Code Duplication** | 12 specialist agents repeat JSON parsing pattern | HIGH | specialist_agents.py |
+| **Code Duplication** | Decomposer classes have identical structure | MEDIUM | planning/decomposition.py |
+| **Hard-coded Config** | System prompts embedded in code (1000+ lines each) | MEDIUM | specialist_agents.py |
+| **Hard-coded Config** | Turn limits, timeouts, URLs hard-coded | LOW | Multiple files |
+| **Thread Safety** | Progress tracking not thread-safe | MEDIUM | agents/orchestrator.py |
+| **Thread Safety** | Circuit breaker state transitions unlocked | MEDIUM | resilience/ |
+| **No Validation** | Cross-tier task consistency not validated | MEDIUM | planning/ |
+| **No Pagination** | Database queries return all results | LOW | storage/database.py |
+| **No Auth** | API endpoints unprotected | HIGH | api/routes.py |
+| **WebSocket** | No reconnection logic in frontend | MEDIUM | frontend/App.vue |
 
-| Aspect | Confidence | Notes |
-|--------|------------|-------|
-| Subsystem identification | **High** | Clear directory structure, well-defined modules |
-| Code quality assessment | **High** | Low TODO count, strong typing, good patterns |
-| Dead code detection | **Medium** | Requires runtime analysis to confirm unused code |
-| Architecture understanding | **High** | Well-documented code, clear patterns |
-| Documentation accuracy | **Low** | Docs reference old project name (MONAD) |
-| Production readiness | **Medium-High** | Backend is solid, frontend is MVP-complete, lacks integration tests |
+## External Interface Points
 
-## Key Questions for Deeper Analysis
+### HTTP API Endpoints
+- Card CRUD: `POST/GET/PUT/DELETE /api/cards`
+- Analysis: `POST /api/analyze`, `POST /api/analyze/incremental`
+- Agents: `GET /api/agents`, `GET /api/agents/{id}/hierarchy`
+- Review: `POST /api/cards/{id}/review`
+- Business Analyst: `POST /api/ba/projects`
+- Cache: `GET/DELETE /api/cache`
+- Health: `GET /health`, `/health/ready`, `/health/live`, `/metrics`
 
-1. **Is `test_parallel.py` in active use or experimental?**
-2. **Are there any unlinked specialist agents?** (specialist_agents.py vs actual usage)
-3. **What is test coverage percentage?** (pytest-cov needed)
-4. **Are all API endpoints actively used by frontend?**
-5. **Is the cache actually improving performance?** (metrics needed)
-6. **Which LLM provider is primary?** (Anthropic vs OpenAI vs OpenRouter)
+### WebSocket Events (broadcast)
+- `card_updated`, `card_deleted`
+- `analysis_started`, `analysis_progress`, `analysis_completed`, `analysis_error`
+- `activity_update`
+- `fix_applied`, `cache_cleared`
 
-## Recommendations for Next Steps
+### LLM Provider Integration
+- Anthropic API (claude-3-5-sonnet-20241022)
+- OpenAI-compatible API (OpenRouter, Groq, Together.ai)
 
-### Immediate (Required for quality assessment)
-1. Run `pytest --cov=src/eidolon tests/` to measure test coverage
-2. Grep for unused imports/functions across codebase
-3. Check if `monad.db` should be renamed to `eidolon.db`
-4. Validate all TODO/FIXME locations are tracked
+## Risk Assessment
 
-### Short-term (Documentation cleanup)
-1. Update all references from MONAD → Eidolon
-2. Update architecture diagrams to reflect current structure
-3. Document the backend→src/eidolon migration
-4. Add CHANGELOG.md to track major changes
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| LLM API downtime | Medium | High | Circuit breaker + fallbacks |
+| Database corruption | Low | High | WAL mode, backups |
+| Token cost explosion | Medium | Medium | Rate limiting, caching |
+| Security breach (no auth) | High | High | **Add authentication** |
+| WebSocket disconnect | High | Low | **Add reconnection** |
 
-### Medium-term (Technical debt)
-1. Add integration tests (E2E flows)
-2. Add frontend tests (Vitest)
-3. Set up CI/CD pipeline
-4. Add code coverage enforcement (>80%)
+## Confidence Level
 
-## Summary for Architect Handover
+**Overall Confidence: HIGH**
 
-**Verdict:** This is a **well-architected, production-ready system** that has been actively developed and recently refactored. The code quality is high, technical debt is low, and the structure is sound.
+This analysis is based on:
+- Direct code reading of all major files
+- AST-based structure extraction
+- Pattern recognition across codebase
+- Cross-referencing imports and dependencies
 
-**Main Issues:**
-1. **Documentation lag** - Docs don't reflect MONAD→Eidolon rename
-2. **Test gaps** - Unit tests exist but no integration/E2E tests
-3. **MVP scope** - Only 3/6 planned tabs implemented (acceptable for MVP)
-
-**Refactor vs Restart?**
-**→ REFACTOR** (definitely not restart)
-
-The codebase is in excellent shape. No justification for rewrite. Focus on:
-- Completing missing features (Test, Repair, Design tabs)
-- Adding integration tests
-- Updating documentation
-- Performance optimization if needed
-
----
-
-**Next Phase:** Proceed to subsystem catalog with parallel subagent analysis.
+**Gaps:**
+- Runtime behavior not observed (no live debugging)
+- Test coverage not measured
+- Performance profiling not conducted

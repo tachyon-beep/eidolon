@@ -8,6 +8,7 @@
   >
     <div class="card-header">
       <span class="card-type">{{ card.type }}</span>
+      <span v-if="grade" class="card-grade">{{ grade }}</span>
       <span class="card-priority" :class="`priority-${card.priority.toLowerCase()}`">
         {{ card.priority }}
       </span>
@@ -49,6 +50,8 @@ const props = defineProps({
 
 const cardStore = useCardStore()
 const route = useRoute()
+
+const grade = computed(() => props.card.metrics?.grade || '')
 
 const statusIcon = computed(() => {
   const icons = {
@@ -147,6 +150,17 @@ const handleClick = () => {
   text-transform: uppercase;
   letter-spacing: 1px;
   border: 1px solid;
+}
+
+.card-grade {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  color: var(--electric-blue);
+  background: rgba(59, 130, 246, 0.12);
 }
 
 .type-review .card-type {

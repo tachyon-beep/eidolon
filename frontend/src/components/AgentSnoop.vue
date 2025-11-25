@@ -115,11 +115,55 @@
         </div>
       </div>
     </div>
+
+    <!-- Cards Tab -->
+    <div v-if="activeTab === 'cards'" class="snoop-panel">
+      <div v-if="agentCards.length === 0" class="empty-cards">No cards for this agent yet.</div>
+      <div v-else class="cards-list">
+        <div
+          v-for="card in agentCards"
+          :key="card.id"
+          class="card-chip"
+          @click="$emit('select-card', card)"
+        >
+          <div class="chip-title">{{ card.title }}</div>
+          <div class="chip-meta">
+            <span class="chip-type">{{ card.type }}</span>
+            <span class="chip-status">{{ card.status }}</span>
+            <span v-if="card.metrics?.grade" class="chip-grade">{{ card.metrics.grade }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Issues Tab -->
+    <div v-if="activeTab === 'issues'" class="snoop-panel">
+      <div v-if="agentIssues.length === 0" class="empty-cards">No structured issues for this agent (raw analysis only).</div>
+      <div v-else class="issues-list">
+        <div v-for="(issue, idx) in agentIssues" :key="idx" class="issue-chip">
+          <div class="issue-chip-header">
+            <span class="issue-chip-title">{{ issue.title }}</span>
+            <span class="issue-chip-meta">
+              <span class="issue-chip-sev">{{ issue.severity || 'Low' }}</span>
+              <span v-if="issue.line_start" class="issue-chip-line">L{{ issue.line_start }}{{ issue.line_end ? `-${issue.line_end}` : '' }}</span>
+            </span>
+          </div>
+          <div class="issue-chip-body">{{ issue.description }}</div>
+          <div class="issue-chip-footer">
+            <span class="issue-chip-card" @click="$emit('select-card', { id: issue.cardId, title: issue.cardTitle })">
+              From: {{ issue.cardTitle }}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import { useCardStore } from '../stores/cardStore'
+import { storeToRefs } from 'pinia'
 
 const props = defineProps({
   agent: {
@@ -134,8 +178,20 @@ const tabs = [
   { id: 'messages', label: 'Messages' },
   { id: 'findings', label: 'Findings' },
   { id: 'snapshots', label: 'Snapshots' },
-  { id: 'graph', label: 'Graph' }
+  { id: 'graph', label: 'Graph' },
+  { id: 'cards', label: 'Cards' },
+  { id: 'issues', label: 'Issues' }
 ]
+
+const cardStore = useCardStore()
+const { cards } = storeToRefs(cardStore)
+
+const agentCards = computed(() => cards.value.filter(c => c.owner_agent === props.agent.id))
+const agentIssues = computed(() => agentCards.value.flatMap(c => (c.issues || []).map(issue => ({
+  ...issue,
+  cardTitle: c.title,
+  cardId: c.id
+}))))
 
 const formatTime = (timestamp) => {
   const date = new Date(timestamp)
@@ -429,5 +485,114 @@ const formatTime = (timestamp) => {
   font-size: 11px;
   font-family: monospace;
   color: #00d4aa;
+}
+
+.cards-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.card-chip {
+  background: #1a1a1a;
+  border: 1px solid #222;
+  border-radius: 6px;
+  padding: 10px;
+  cursor: pointer;
+  transition: background 0.2s, border 0.2s;
+}
+
+.card-chip:hover {
+  background: #202020;
+  border-color: #2a2a2a;
+}
+
+.chip-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e0e0e0;
+  margin-bottom: 6px;
+}
+
+.chip-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+  color: #aaa;
+}
+
+.chip-grade {
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  color: #7cc4ff;
+  background: rgba(59, 130, 246, 0.1);
+  font-weight: 600;
+}
+
+.empty-cards {
+  font-size: 12px;
+  color: #888;
+}
+
+.issues-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.issue-chip {
+  background: #1a1a1a;
+  border: 1px solid #222;
+  border-radius: 6px;
+  padding: 10px;
+  color: #e0e0e0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.issue-chip-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.issue-chip-title {
+  font-weight: 700;
+}
+
+.issue-chip-meta {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 11px;
+  color: #aaa;
+}
+
+.issue-chip-sev {
+  padding: 2px 6px;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  border-radius: 4px;
+  color: #f87171;
+}
+
+.issue-chip-line {
+  padding: 2px 6px;
+  border: 1px solid rgba(167, 139, 250, 0.4);
+  border-radius: 4px;
+  color: #c4b5fd;
+}
+
+.issue-chip-body {
+  font-size: 12px;
+  color: #ccc;
+}
+
+.issue-chip-card {
+  font-size: 11px;
+  color: #7cc4ff;
+  cursor: pointer;
 }
 </style>

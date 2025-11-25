@@ -6,9 +6,10 @@ import asyncio
 import os
 import time
 
-from eidolon.models import Card, CardStatus, Agent
+from eidolon.models import Card, CardStatus, CardType, CardPriority, Agent, CardIssue
 from eidolon.storage import Database
 from eidolon.agents import AgentOrchestrator
+from eidolon.business_analyst import BusinessAnalyst
 from eidolon.request_context import analysis_registry, AnalysisCancelledError
 from eidolon.metrics import (
     track_analysis, http_requests_total, http_request_duration_seconds,
@@ -33,6 +34,35 @@ class IncrementalAnalyzeRequest(BaseModel):
 class UpdateCardRequest(BaseModel):
     status: Optional[CardStatus] = None
     routing: Optional[Dict[str, str]] = None
+    issues: Optional[List[Dict[str, Any]]] = None
+
+
+class CreateCardRequest(BaseModel):
+    type: CardType
+    title: str
+    summary: str = ""
+    status: CardStatus = CardStatus.NEW
+    priority: CardPriority = CardPriority.P2
+    owner_agent: Optional[str] = None
+    parent: Optional[str] = None
+    routing: Optional[Dict[str, str]] = None
+    links: Optional[Dict[str, List[str]]] = None
+    payload_issue_index: Optional[int] = None  # optional pointer to mark parent issue as promoted
+
+
+class ReviewCardRequest(BaseModel):
+    include_callers: bool = False
+    include_callees: bool = False
+    include_peers: bool = False
+
+
+class BAProjectRequest(BaseModel):
+    project_name: str
+    description: str
+    goals: Optional[List[str]] = None
+    constraints: Optional[List[str]] = None
+    assumptions: Optional[List[str]] = None
+    path: str
 
 
 class ConnectionManager:
@@ -79,8 +109,57 @@ manager = ConnectionManager()
 
 def create_routes(db: Database, orchestrator: AgentOrchestrator):
     """Create API routes with database and orchestrator dependencies"""
+    ba = BusinessAnalyst(llm_provider=orchestrator.llm_provider)
 
     # Card endpoints
+    @router.post("/cards", response_model=Card)
+    async def create_card(request: CreateCardRequest):
+        """Create a new card (promotion from recommendation or manual)"""
+        card = Card(
+            id="",
+            type=request.type,
+            title=request.title,
+            summary=request.summary,
+            status=request.status,
+            priority=request.priority,
+            owner_agent=request.owner_agent,
+            parent=request.parent
+        )
+
+        if request.links:
+            card.links.code = request.links.get("code", [])
+            card.links.tests = request.links.get("tests", [])
+            card.links.docs = request.links.get("docs", [])
+
+        if request.routing:
+            card.routing.from_tab = request.routing.get("from_tab")
+            card.routing.to_tab = request.routing.get("to_tab")
+
+        card = await db.create_card(card)
+
+        # Link to parent card if provided
+        if request.parent:
+            parent_card = await db.get_card(request.parent)
+            if parent_card:
+                if card.id not in parent_card.children:
+                    parent_card.children.append(card.id)
+                    # If parent has issues, try to mark matching issue as promoted
+                    if request.payload_issue_index is not None and 0 <= request.payload_issue_index < len(parent_card.issues):
+                        parent_card.issues[request.payload_issue_index].promoted = True
+                    await db.update_card(parent_card)
+                # Broadcast parent update
+                await manager.broadcast({
+                    "type": "card_updated",
+                    "data": parent_card.dict()
+                })
+
+        await manager.broadcast({
+            "type": "card_updated",
+            "data": card.dict()
+        })
+
+        return card
+
     @router.get("/cards", response_model=List[Card])
     async def get_cards(
         type: Optional[str] = None,
@@ -125,6 +204,13 @@ def create_routes(db: Database, orchestrator: AgentOrchestrator):
                 event=f"Routed from {card.routing.from_tab} to {card.routing.to_tab}"
             )
 
+        # Support issue updates (e.g., mark promoted)
+        if request.issues is not None:
+            try:
+                card.issues = [CardIssue(**issue) for issue in request.issues]
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid issues payload")
+
         card = await db.update_card(card)
 
         # Broadcast update
@@ -144,6 +230,217 @@ def create_routes(db: Database, orchestrator: AgentOrchestrator):
             "data": {"id": card_id}
         })
         return {"status": "deleted"}
+
+    @router.post("/ba/projects")
+    async def create_project_from_ba(request: BAProjectRequest):
+        """
+        Start a Business Architect session to turn a project idea into requirement cards.
+        Returns generated cards (not persisted) so the user can promote/save as needed.
+        """
+        # Validate path
+        try:
+            project_path = Path(request.path).expanduser().resolve()
+            if not project_path.exists() or not project_path.is_dir():
+                raise HTTPException(status_code=400, detail=f"Path does not exist or is not a directory: {request.path}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid path: {e}")
+
+        prompt = f"""Project: {request.project_name}
+Description: {request.description}
+Goals: {request.goals or []}
+Constraints: {request.constraints or []}
+Assumptions: {request.assumptions or []}
+Working path: {project_path}
+
+Produce a small set of requirement/feature cards with:
+- title
+- summary
+- priority (P0-P3)
+- acceptance criteria bullets
+Return JSON: {{"cards": [{{"title": "...", "summary": "...", "priority": "P1", "acceptance": ["..."]}}]}}"""
+
+        try:
+            response = await orchestrator.llm_provider.create_completion(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=800,
+                temperature=0.2,
+                response_format={"type": "json_object"}
+            )
+            import json
+            data = json.loads(response.content)
+            cards_payload = data.get("cards", []) if isinstance(data, dict) else []
+            generated_cards = []
+            for idx, c in enumerate(cards_payload):
+                title = c.get("title") or f"{request.project_name} feature {idx+1}"
+                summary = c.get("summary") or ""
+                priority = c.get("priority") or "P2"
+                acceptance = c.get("acceptance") or []
+                summary_full = summary
+                if acceptance:
+                    summary_full += "\n\nAcceptance:\n- " + "\n- ".join(acceptance)
+                generated_cards.append({
+                    "title": title,
+                    "summary": summary_full,
+                    "priority": priority,
+                    "type": "Requirement",
+                    "status": "New"
+                })
+            return {"cards": generated_cards}
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"BA generation failed: {e}")
+
+    @router.post("/cards/{card_id}/review")
+    async def review_card(card_id: str, request: ReviewCardRequest):
+        """
+        Send a card back to LLM for review with optional context.
+        Supports function/class/module cards with graph context.
+        """
+        card = await db.get_card(card_id)
+        if not card:
+            raise HTTPException(status_code=404, detail="Card not found")
+
+        # Try to resolve context from owner agent first, fall back to code links
+        file_path: Optional[Path] = None
+        target_name: Optional[str] = None
+        agent_scope = None
+
+        agent = None
+        if card.owner_agent:
+            agent = await db.get_agent(card.owner_agent)
+            if agent:
+                agent_scope = agent.scope
+                target_parts = agent.target.split("::")
+                if target_parts:
+                    file_path = Path(target_parts[0])
+                    target_name = target_parts[1] if len(target_parts) > 1 else None
+
+        # Fallback to first code link if no owner agent context
+        if (not file_path or not file_path.exists()) and card.links.code:
+            candidate = card.links.code[0]
+            file_part = candidate.split(":", 1)[0]
+            candidate_path = Path(file_part)
+            if candidate_path.exists():
+                file_path = candidate_path
+                target_name = None  # unknown
+
+        if not file_path or not file_path.exists():
+            raise HTTPException(status_code=400, detail="Unable to resolve file for review (no owner agent target or code link)")
+
+        from eidolon.analysis import CodeAnalyzer
+        analyzer = CodeAnalyzer()
+        analyzer.base_path = file_path.parent
+        try:
+            modules = analyzer.analyze_directory()
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to analyze directory for review: {e}")
+
+        module_info = next((m for m in modules if Path(m.file_path).samefile(file_path)), None)
+        call_graph = analyzer.build_call_graph(modules)
+
+        context_parts = [
+            "Review this card and the associated code element.",
+            f"Card title: {card.title}",
+            f"Card summary: {card.summary}",
+            f"File: {file_path}"
+        ]
+        if agent_scope:
+            context_parts.append(f"Agent scope: {agent_scope}")
+        if card.metrics.grade:
+            context_parts.append(f"Prior grade: {card.metrics.grade}")
+
+        source_snippet = ""
+        func_match = None
+
+        if target_name and module_info:
+            # Try to find function or method in module_info
+            func_match = next((f for f in module_info.functions if f.name == target_name or target_name.endswith(f.name)), None)
+            if not func_match:
+                # Check methods with class prefix
+                for cls in module_info.classes:
+                    for method in cls.methods:
+                        combined = f"{cls.name}.{method.name}"
+                        if combined == target_name or target_name.endswith(combined):
+                            func_match = method
+                            break
+                    if func_match:
+                        break
+
+        if func_match and module_info:
+            with open(file_path, 'r') as f:
+                lines = f.readlines()
+            source_snippet = ''.join(lines[func_match.line_start - 1:func_match.line_end])
+            context_parts.append(f"Function lines {func_match.line_start}-{func_match.line_end}:\n```python\n{source_snippet}\n```")
+
+            func_context = analyzer.get_function_context(func_match, call_graph, module_info)
+            if request.include_callers and func_context.get('caller_code'):
+                context_parts.append("Callers:")
+                for caller in func_context['caller_code']:
+                    context_parts.append(f"\n```python\n# {caller['name']}\n{caller['code']}\n```")
+            if request.include_callees and func_context.get('callee_code'):
+                context_parts.append("Callees:")
+                for callee in func_context['callee_code']:
+                    context_parts.append(f"\n```python\n# {callee['name']}\n{callee['code']}\n```")
+
+            if request.include_peers and module_info.classes:
+                # Peer methods in same class if applicable
+                peer_methods = []
+                for cls in module_info.classes:
+                    for method in cls.methods:
+                        combined = f"{cls.name}.{method.name}"
+                        if combined == target_name:
+                            peer_methods = [m for m in cls.methods if m.name != method.name]
+                            break
+                    if peer_methods:
+                        break
+                if peer_methods:
+                    context_parts.append("Peer methods (same class):")
+                    with open(file_path, 'r') as f:
+                        lines = f.readlines()
+                    for peer in peer_methods[:3]:
+                        peer_code = ''.join(lines[peer.line_start - 1:peer.line_end])
+                        context_parts.append(f"\n```python\n# {peer.name}\n{peer_code}\n```")
+        else:
+            # Fallback: include whole module snippet
+            with open(file_path, 'r') as f:
+                context_parts.append(f"Module code:\n```python\n{f.read()[:2000]}\n```")
+
+        prompt = "\n\n".join(context_parts) + "\n\n" + "Provide a concise review: grade the element (A/B/C/D/E), list issues as bullet points, and suggest fixes. Return markdown."
+
+        try:
+            llm_response = await orchestrator.llm_provider.create_completion(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=800,
+                temperature=0.0
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"LLM review failed: {str(e)}")
+
+        # Log the review on the card
+        card.add_log_entry(
+            actor="llm-review",
+            event="LLM review requested",
+            diff={
+                "include_callers": request.include_callers,
+                "include_callees": request.include_callees,
+                "include_peers": request.include_peers,
+                "response_preview": llm_response.content[:2000]
+            }
+        )
+        await db.update_card(card)
+
+        await manager.broadcast({
+            "type": "card_updated",
+            "data": card.dict()
+        })
+
+        return {
+            "status": "completed",
+            "response": llm_response.content
+        }
 
     # Agent endpoints
     @router.get("/agents", response_model=List[Agent])
@@ -430,7 +727,12 @@ def create_routes(db: Database, orchestrator: AgentOrchestrator):
                 "data": {
                     "card_id": card_id,
                     "file": card.proposed_fix.file_path,
-                    "backup": backup_path
+                    "backup": backup_path,
+                    "diff": {
+                        "line_start": card.proposed_fix.line_start,
+                        "line_end": card.proposed_fix.line_end,
+                        "fixed_code": card.proposed_fix.fixed_code
+                    }
                 }
             })
 

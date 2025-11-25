@@ -124,6 +124,45 @@
       <div class="stats">
         {{ filteredCards.length }} card{{ filteredCards.length !== 1 ? 's' : '' }}
       </div>
+
+      <button class="new-card-btn" @click="showCreateCard = !showCreateCard">
+        {{ showCreateCard ? 'Close' : 'New Card' }}
+      </button>
+    </div>
+
+    <div v-if="showCreateCard" class="create-card-panel">
+      <div class="panel-row">
+        <label>Title</label>
+        <input v-model="newCard.title" type="text" placeholder="Short title" />
+      </div>
+      <div class="panel-row">
+        <label>Type</label>
+        <select v-model="newCard.type">
+          <option value="Review">Review</option>
+          <option value="Change">Change</option>
+          <option value="Architecture">Architecture</option>
+          <option value="Defect">Defect</option>
+          <option value="Test">Test</option>
+          <option value="Requirement">Requirement</option>
+        </select>
+      </div>
+      <div class="panel-row">
+        <label>Priority</label>
+        <select v-model="newCard.priority">
+          <option value="P0">P0</option>
+          <option value="P1">P1</option>
+          <option value="P2">P2</option>
+          <option value="P3">P3</option>
+        </select>
+      </div>
+      <div class="panel-row">
+        <label>Summary</label>
+        <textarea v-model="newCard.summary" rows="3" placeholder="Why this matters"></textarea>
+      </div>
+      <div class="panel-actions">
+        <button class="submit-btn" @click="handleCreateCard">Create</button>
+        <button class="cancel-btn" @click="resetCreateCard">Cancel</button>
+      </div>
     </div>
 
     <div class="cards-board">
@@ -134,11 +173,45 @@
       </div>
 
       <div v-else class="cards-grid">
-        <CardTile
-          v-for="card in filteredCards"
-          :key="card.id"
-          :card="card"
-        />
+        <div v-for="card in filteredCards" :key="card.id" class="card-with-issues">
+          <CardTile :card="card" />
+          <div v-if="card.issues && card.issues.length" class="inline-issues">
+            <div class="issues-header">
+              <span>Issues</span>
+            </div>
+            <div class="issues-list">
+              <div
+                v-for="(issue, idx) in card.issues"
+                :key="idx"
+                class="inline-issue"
+              >
+                <div class="inline-issue-main">
+                  <div class="inline-issue-title">{{ issue.title }}</div>
+                  <div class="inline-issue-meta">
+                    <span class="inline-chip sev" :class="`sev-${(issue.severity || 'low').toLowerCase()}`">{{ issue.severity || 'Low' }}</span>
+                    <span v-if="issue.line_start" class="inline-chip line">L{{ issue.line_start }}{{ issue.line_end ? `-${issue.line_end}` : '' }}</span>
+                    <span v-if="issue.promoted" class="inline-chip promoted">Promoted</span>
+                  </div>
+                </div>
+                  <div class="inline-issue-actions">
+                    <label>Send to tab:</label>
+                  <select :value="getDestination(card.id, idx)" @change="setDestination(card.id, idx, $event.target.value)">
+                    <option value="Explore">Explore</option>
+                    <option value="Code">Code</option>
+                    <option value="Plan">Plan</option>
+                  </select>
+                  <button
+                    class="promote-btn"
+                    :disabled="issue.promoted"
+                    @click="promoteIssue(card, issue, idx)"
+                  >
+                    {{ issue.promoted ? 'Promoted' : 'Promote' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -165,6 +238,14 @@ const filters = ref({
   type: '',
   status: ''
 })
+const showCreateCard = ref(false)
+const newCard = ref({
+  title: '',
+  type: 'Review',
+  priority: 'P2',
+  summary: ''
+})
+const issueDestinations = ref({})
 
 const currentActivity = computed(() => {
   if (recentActivities.value.length > 0) {
@@ -224,6 +305,103 @@ const handleClearCache = async () => {
     } catch (error) {
       alert('Failed to clear cache: ' + error.message)
     }
+  }
+}
+
+const resetCreateCard = () => {
+  newCard.value = {
+    title: '',
+    type: 'Review',
+    priority: 'P2',
+    summary: ''
+  }
+  showCreateCard.value = false
+}
+
+const handleCreateCard = async () => {
+  if (!newCard.value.title) return
+  try {
+    await cardStore.createCard({
+      title: newCard.value.title,
+      type: newCard.value.type,
+      summary: newCard.value.summary,
+      priority: newCard.value.priority,
+      status: 'New'
+    })
+    resetCreateCard()
+    await cardStore.fetchCards()
+  } catch (error) {
+    console.error('Failed to create card', error)
+  }
+}
+
+const getDestination = (cardId, issueIdx) => {
+  const cardDest = issueDestinations.value[cardId]
+  if (cardDest && cardDest[issueIdx]) {
+    return cardDest[issueIdx]
+  }
+  return 'Explore'
+}
+
+const setDestination = (cardId, issueIdx, value) => {
+  const existing = issueDestinations.value[cardId] || {}
+  issueDestinations.value = {
+    ...issueDestinations.value,
+    [cardId]: {
+      ...existing,
+      [issueIdx]: value || 'Explore'
+    }
+  }
+}
+
+const promoteIssue = async (card, issue, idx) => {
+  const severityMap = {
+    high: 'P0',
+    medium: 'P1',
+    low: 'P2'
+  }
+  const typeMap = {
+    defect: 'Defect',
+    bug: 'Defect',
+    security: 'Defect',
+    refactor: 'Change',
+    performance: 'Change',
+    change: 'Change',
+    doc: 'Review',
+    review: 'Review',
+    test: 'Test',
+    requirement: 'Requirement'
+  }
+
+  const severityKey = (issue.severity || '').toLowerCase()
+  const issueTypeKey = (issue.type || '').toLowerCase()
+  const dest = getDestination(card.id, idx)
+
+  const filePath = (card.links?.code && card.links.code.length > 0)
+    ? card.links.code[0].split(':')[0]
+    : ''
+
+  const codeLinks = []
+  if (filePath) {
+    const start = issue.line_start || ''
+    codeLinks.push(start ? `${filePath}:${start}` : filePath)
+  }
+
+  try {
+    await cardStore.createCard({
+      title: issue.title || 'Issue',
+      type: typeMap[issueTypeKey] || 'Review',
+      summary: issue.description || '',
+      priority: severityMap[severityKey] || 'P2',
+      status: 'New',
+      parent: card.id,
+      links: { code: codeLinks },
+      routing: { from_tab: card.routing?.to_tab || 'Explore', to_tab: dest },
+      payload_issue_index: idx
+    })
+    await cardStore.fetchCards()
+  } catch (error) {
+    console.error('Failed to promote issue', error)
   }
 }
 
@@ -741,8 +919,212 @@ onMounted(() => {
   border: 1px solid rgba(167, 139, 250, 0.15);
 }
 
+.new-card-btn {
+  padding: 10px 14px;
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--text-primary);
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.new-card-btn:hover {
+  border-color: rgba(59, 130, 246, 0.6);
+  background: rgba(59, 130, 246, 0.18);
+}
+
+.create-card-panel {
+  padding: 16px;
+  background: rgba(30, 30, 52, 0.4);
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+}
+
+.panel-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.panel-row label {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+}
+
+.panel-row input,
+.panel-row select,
+.panel-row textarea {
+  background: rgba(30, 30, 52, 0.6);
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+}
+
+.panel-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.submit-btn,
+.cancel-btn {
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  background: rgba(167, 139, 250, 0.1);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.submit-btn {
+  border-color: rgba(0, 212, 170, 0.5);
+  background: rgba(0, 212, 170, 0.15);
+}
+
+.submit-btn:hover {
+  background: rgba(0, 212, 170, 0.25);
+}
+
+.cancel-btn:hover {
+  background: rgba(167, 139, 250, 0.18);
+}
+
 .cards-board {
   min-height: 300px;
+}
+
+.card-with-issues {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.inline-issues {
+  background: rgba(30, 30, 52, 0.25);
+  border: 1px solid rgba(167, 139, 250, 0.15);
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.issues-header {
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.issues-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inline-issue {
+  background: rgba(13, 13, 30, 0.4);
+  border: 1px solid rgba(167, 139, 250, 0.12);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.inline-issue-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.inline-issue-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.inline-issue-meta {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.inline-chip {
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  color: var(--text-primary);
+}
+
+.inline-chip.sev-high {
+  border-color: rgba(248, 113, 113, 0.6);
+  color: #f87171;
+}
+
+.inline-chip.sev-medium {
+  border-color: rgba(245, 158, 11, 0.6);
+  color: #f59e0b;
+}
+
+.inline-chip.sev-low {
+  border-color: rgba(52, 211, 153, 0.6);
+  color: #34d399;
+}
+
+.inline-chip.line {
+  border-color: rgba(167, 139, 250, 0.4);
+  color: #c4b5fd;
+}
+
+.inline-chip.promoted {
+  border-color: rgba(0, 212, 170, 0.5);
+  color: #00d4aa;
+}
+
+.inline-issue-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.inline-issue-actions select {
+  background: rgba(30, 30, 52, 0.6);
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  border-radius: 6px;
+  color: var(--text-primary);
+  padding: 6px 8px;
+}
+
+.inline-issue-actions .promote-btn {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 212, 170, 0.4);
+  background: rgba(0, 212, 170, 0.12);
+  color: #00d4aa;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.inline-issue-actions .promote-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.inline-issue-actions .promote-btn:not(:disabled):hover {
+  background: rgba(0, 212, 170, 0.2);
 }
 
 .empty-state {

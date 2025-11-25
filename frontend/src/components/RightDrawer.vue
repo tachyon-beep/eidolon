@@ -40,6 +40,11 @@
           <div class="detail-value">{{ card.priority }}</div>
         </div>
 
+        <div class="detail-section" v-if="card.metrics?.grade">
+          <label>Grade</label>
+          <div class="detail-value">{{ card.metrics.grade }}</div>
+        </div>
+
         <div class="detail-section" v-if="card.owner_agent">
           <label>Owner Agent</label>
           <div class="detail-value">
@@ -52,6 +57,42 @@
         <div class="detail-section">
           <label>Summary</label>
           <div class="detail-value markdown" v-html="renderMarkdown(card.summary)"></div>
+        </div>
+
+        <div v-if="card.issues && card.issues.length" class="issues-section">
+          <h3>Issues ({{ card.issues.length }})</h3>
+          <div v-for="(issue, idx) in card.issues" :key="idx" class="issue-item">
+            <div class="issue-header">
+              <div class="issue-title">{{ issue.title }}</div>
+              <div class="issue-chips">
+                <span class="issue-chip severity" :class="`sev-${issue.severity?.toLowerCase() || 'low'}`">{{ issue.severity || 'Low' }}</span>
+                <span v-if="issue.type" class="issue-chip type">{{ issue.type }}</span>
+                <span v-if="issue.line_start" class="issue-chip line">L{{ issue.line_start }}{{ issue.line_end ? `-${issue.line_end}` : '' }}</span>
+              </div>
+            </div>
+            <div class="issue-description">{{ issue.description }}</div>
+            <pre v-if="issue.fix_code" class="issue-fix"><code>{{ issue.fix_code }}</code></pre>
+            <div class="issue-actions">
+              <div class="issue-route">
+                <label>Send to tab:</label>
+                <select :value="getDestination(idx)" @change="setDestination(idx, $event.target.value)">
+                  <option value="Explore">Explore</option>
+                  <option value="Code">Code</option>
+                  <option value="Plan">Plan</option>
+                </select>
+              </div>
+              <button
+                class="promote-btn"
+                :disabled="isPromoted(issue, idx)"
+                @click="promoteIssue(issue, idx)"
+              >
+                {{ isPromoted(issue, idx) ? 'Promoted' : 'Promote to Card' }}
+              </button>
+            </div>
+          </div>
+        </div>
+        <div v-else class="issues-fallback">
+          <span>No structured issues attached; showing raw analysis only.</span>
         </div>
       </div>
 
@@ -118,9 +159,18 @@
           >
             {{ applying ? 'Applying...' : 'Apply Fix' }}
           </button>
+          <button
+            v-if="backupPath"
+            class="rollback-btn"
+            @click="rollbackFix"
+            :disabled="applying"
+          >
+            Rollback
+          </button>
           <p class="fix-warning" v-if="card.proposed_fix.validated">
             A backup will be created before applying the fix
           </p>
+          <p v-if="backupPath" class="fix-backup">Backup: {{ backupPath }}</p>
         </div>
       </div>
 
@@ -139,7 +189,7 @@
 
       <!-- Agent Snoop Tab (if owner_agent exists) -->
       <div v-if="activeTab === 'snoop' && agentData" class="tab-panel">
-        <AgentSnoop :agent="agentData" />
+        <AgentSnoop :agent="agentData" @select-card="selectCardFromSnoop" />
       </div>
     </div>
 
@@ -150,6 +200,39 @@
       <button class="action-btn secondary" @click="updateStatus">
         Update Status
       </button>
+      <button class="action-btn tertiary" @click="showReviewModal = true">
+        LLM Review
+      </button>
+    </div>
+
+    <div v-if="showReviewModal" class="modal-backdrop">
+      <div class="modal">
+        <h3>Send for LLM Review</h3>
+        <label class="modal-row">
+          <input type="checkbox" v-model="reviewOptions.include_callers" />
+          <span>Attach callers</span>
+        </label>
+        <label class="modal-row">
+          <input type="checkbox" v-model="reviewOptions.include_callees" />
+          <span>Attach callees</span>
+        </label>
+        <label class="modal-row">
+          <input type="checkbox" v-model="reviewOptions.include_peers" />
+          <span>Attach peers (class/method)</span>
+        </label>
+
+        <div class="modal-actions">
+          <button class="action-btn" @click="requestReview" :disabled="reviewing">
+            {{ reviewing ? 'Reviewing...' : 'Send' }}
+          </button>
+          <button class="action-btn secondary" @click="showReviewModal = false">Cancel</button>
+        </div>
+
+        <div v-if="reviewResponse" class="modal-response">
+          <h4>LLM Response</h4>
+          <pre>{{ reviewResponse }}</pre>
+        </div>
+      </div>
     </div>
   </aside>
 </template>
@@ -170,6 +253,17 @@ const agentData = computed(() => selectedAgent.value)
 
 const activeTab = ref('details')
 const applying = ref(false)
+const promotedIndices = ref([])
+const showReviewModal = ref(false)
+const reviewing = ref(false)
+const reviewResponse = ref('')
+const reviewOptions = ref({
+  include_callers: true,
+  include_callees: true,
+  include_peers: false
+})
+const issueDestinations = ref({})
+const backupPath = ref('')
 
 const tabs = computed(() => {
   const baseTabs = [
@@ -237,13 +331,18 @@ const applyFix = async () => {
 
   applying.value = true
   try {
-    await cardStore.applyFix(card.value.id)
+    const res = await cardStore.applyFix(card.value.id)
+    backupPath.value = res.backup
     alert('Fix applied successfully! A backup was created.')
   } catch (error) {
     alert(`Failed to apply fix: ${error.message}`)
   } finally {
     applying.value = false
   }
+}
+
+const rollbackFix = async () => {
+  alert(`Rollback is manual. Restore from backup:\n${backupPath.value || 'No backup recorded yet.'}`)
 }
 
 const renderMarkdown = (text) => {
@@ -265,6 +364,107 @@ const renderMarkdown = (text) => {
 const formatTime = (timestamp) => {
   const date = new Date(timestamp)
   return date.toLocaleString()
+}
+
+const requestReview = async () => {
+  if (!card.value) return
+  reviewing.value = true
+  reviewResponse.value = ''
+  try {
+    const res = await cardStore.reviewCard(card.value.id, reviewOptions.value)
+    reviewResponse.value = res.response
+  } catch (error) {
+    reviewResponse.value = `Review failed: ${error.message || error}`
+  } finally {
+    reviewing.value = false
+  }
+}
+
+const promoteIssue = async (issue, idx) => {
+  const severityMap = {
+    high: 'P0',
+    medium: 'P1',
+    low: 'P2'
+  }
+  const typeMap = {
+    defect: 'Defect',
+    bug: 'Defect',
+    security: 'Defect',
+    refactor: 'Change',
+    performance: 'Change',
+    change: 'Change',
+    doc: 'Review',
+    review: 'Review',
+    test: 'Test',
+    requirement: 'Requirement'
+  }
+
+  const severityKey = (issue.severity || '').toLowerCase()
+  const issueTypeKey = (issue.type || '').toLowerCase()
+
+  const filePath = (card.value?.links?.code && card.value.links.code.length > 0)
+    ? card.value.links.code[0].split(':')[0]
+    : ''
+
+  const codeLinks = []
+  if (filePath) {
+    const start = issue.line_start || ''
+    codeLinks.push(start ? `${filePath}:${start}` : filePath)
+  }
+
+  try {
+    await cardStore.createCard({
+      title: issue.title || 'Issue',
+      type: typeMap[issueTypeKey] || 'Review',
+      summary: issue.description || '',
+      priority: severityMap[severityKey] || 'P2',
+      status: 'New',
+      parent: card.value?.id,
+      links: { code: codeLinks },
+      routing: { from_tab: card.value?.routing?.to_tab || 'Explore', to_tab: getDestination(idx) },
+      payload_issue_index: idx
+    })
+    promotedIndices.value.push(idx)
+    // Mark issue promoted locally and on card
+    if (card.value?.issues && card.value.issues[idx]) {
+      card.value.issues[idx].promoted = true
+      await cardStore.updateCard(card.value.id, { issues: card.value.issues })
+    }
+  } catch (error) {
+    console.error('Failed to promote issue', error)
+  }
+}
+
+const isPromoted = (issue, idx) => issue?.promoted || promotedIndices.value.includes(idx)
+
+const getDestination = (issueIdx) => {
+  if (issueDestinations.value[issueIdx]) {
+    return issueDestinations.value[issueIdx]
+  }
+  return 'Explore'
+}
+
+const setDestination = (issueIdx, value) => {
+  issueDestinations.value = {
+    ...issueDestinations.value,
+    [issueIdx]: value || 'Explore'
+  }
+}
+
+const selectCardFromSnoop = async (payload) => {
+  // payload may be a full card or {id, title}; resolve to full card
+  if (!payload) return
+  let target = null
+  const cards = cardStore.cards
+  if (cards && Array.isArray(cards) && cards.value) {
+    target = cards.value.find(c => c.id === payload.id)
+  }
+  if (!target && payload.id) {
+    target = await cardStore.getCard(payload.id)
+  }
+  if (target) {
+    cardStore.selectCard(target)
+  }
 }
 </script>
 
@@ -383,6 +583,207 @@ const formatTime = (timestamp) => {
 
 .detail-value.markdown {
   line-height: 1.8;
+}
+
+.issues-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.issues-section h3 {
+  margin: 0;
+  font-size: 13px;
+  color: #e0e0e0;
+}
+
+.issue-item {
+  padding: 12px;
+  border: 1px solid #222;
+  border-radius: 8px;
+  background: #111;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.issue-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.issue-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #e0e0e0;
+}
+
+.issue-chips {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.issue-chip {
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  border: 1px solid #2a2a2a;
+  color: #ccc;
+}
+
+.issue-chip.severity {
+  border-color: #4b5563;
+}
+
+.issue-chip.sev-high {
+  border-color: rgba(248, 113, 113, 0.6);
+  color: #f87171;
+}
+
+.issue-chip.sev-medium {
+  border-color: rgba(245, 158, 11, 0.6);
+  color: #f59e0b;
+}
+
+.issue-chip.sev-low {
+  border-color: rgba(52, 211, 153, 0.6);
+  color: #34d399;
+}
+
+.issue-chip.type {
+  border-color: rgba(59, 130, 246, 0.4);
+  color: #7cc4ff;
+}
+
+.issue-chip.line {
+  border-color: rgba(167, 139, 250, 0.4);
+  color: #c4b5fd;
+}
+
+.issue-description {
+  font-size: 12px;
+  color: #ccc;
+  line-height: 1.5;
+}
+
+.issue-fix {
+  margin: 0;
+  background: #0f172a;
+  color: #c7d2fe;
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+.issue-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.issue-route {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #aaa;
+}
+
+.issue-route select {
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  color: #e0e0e0;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 11px;
+}
+
+.promote-btn {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 212, 170, 0.4);
+  background: rgba(0, 212, 170, 0.12);
+  color: #00d4aa;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.promote-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.promote-btn:not(:disabled):hover {
+  background: rgba(0, 212, 170, 0.2);
+  border-color: rgba(0, 212, 170, 0.6);
+}
+
+.issues-fallback {
+  margin-top: 12px;
+  padding: 10px;
+  background: #111;
+  border: 1px dashed #333;
+  border-radius: 8px;
+  color: #aaa;
+  font-size: 12px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+
+.modal {
+  background: #0f0f0f;
+  border: 1px solid #222;
+  border-radius: 12px;
+  padding: 20px;
+  width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modal-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  color: #e0e0e0;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.modal-response {
+  margin-top: 10px;
+  background: #111;
+  border: 1px solid #222;
+  border-radius: 8px;
+  padding: 10px;
+  max-height: 200px;
+  overflow-y: auto;
+  color: #e0e0e0;
+}
+
+.action-btn.tertiary {
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  background: rgba(59, 130, 246, 0.12);
+  color: #7cc4ff;
 }
 
 .agent-link {

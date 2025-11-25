@@ -21,6 +21,51 @@
       <div class="stats">
         {{ filteredCards.length }} architecture card{{ filteredCards.length !== 1 ? 's' : '' }}
       </div>
+
+      <button class="new-ba-btn" @click="showBA = true">New Project (BA)</button>
+    </div>
+
+    <div v-if="showBA" class="ba-panel">
+      <div class="panel-row">
+        <label>Project Name</label>
+        <input v-model="baForm.project_name" type="text" placeholder="New initiative name" />
+      </div>
+      <div class="panel-row">
+        <label>Path (folder/repo)</label>
+        <input v-model="baForm.path" type="text" placeholder="/path/to/repo" />
+      </div>
+      <div class="panel-row">
+        <label>Description</label>
+        <textarea v-model="baForm.description" rows="3" placeholder="High-level description"></textarea>
+      </div>
+      <div class="panel-row">
+        <label>Goals (comma separated)</label>
+        <input v-model="baGoals" type="text" placeholder="Improve reliability, Reduce latency" />
+      </div>
+      <div class="panel-row">
+        <label>Constraints (comma separated)</label>
+        <input v-model="baConstraints" type="text" placeholder="No downtime, Budget cap" />
+      </div>
+      <div class="panel-row">
+        <label>Assumptions (comma separated)</label>
+        <input v-model="baAssumptions" type="text" placeholder="Team size 3, Python stack" />
+      </div>
+      <div v-if="baError" class="ba-error">{{ baError }}</div>
+      <div class="panel-actions">
+        <button class="submit-btn" :disabled="baLoading" @click="runBA">
+          {{ baLoading ? 'Generating...' : 'Generate feature cards' }}
+        </button>
+        <button class="cancel-btn" @click="resetBA">Close</button>
+      </div>
+      <div v-if="baGenerated.length" class="ba-results">
+        <h4>Generated Feature Cards</h4>
+        <div class="ba-card" v-for="(c, idx) in baGenerated" :key="idx">
+          <div class="ba-title">{{ c.title }}</div>
+          <div class="ba-summary">{{ c.summary }}</div>
+          <div class="ba-meta">Priority: {{ c.priority }}</div>
+          <button class="submit-btn" @click="saveGenerated(c)">Save to Plan</button>
+        </div>
+      </div>
     </div>
 
     <div class="cards-board">
@@ -51,6 +96,18 @@ const cardStore = useCardStore()
 const { cards } = storeToRefs(cardStore)
 
 const statusFilter = ref('')
+const showBA = ref(false)
+const baLoading = ref(false)
+const baGenerated = ref([])
+const baForm = ref({
+  project_name: '',
+  description: '',
+  path: ''
+})
+const baGoals = ref('')
+const baConstraints = ref('')
+const baAssumptions = ref('')
+const baError = ref('')
 
 const filteredCards = computed(() => {
   let result = cards.value.filter(c => c.type === 'Architecture')
@@ -64,6 +121,53 @@ const filteredCards = computed(() => {
 
 const applyFilters = () => {
   // Filters are reactive
+}
+
+const resetBA = () => {
+  baForm.value = { project_name: '', description: '', path: '' }
+  baGoals.value = ''
+  baConstraints.value = ''
+  baAssumptions.value = ''
+  baGenerated.value = []
+  showBA.value = false
+  baError.value = ''
+}
+
+const runBA = async () => {
+  if (!baForm.value.project_name || !baForm.value.description || !baForm.value.path) return
+  baLoading.value = true
+  baError.value = ''
+  try {
+    const cards = await cardStore.generateBAProject({
+      project_name: baForm.value.project_name,
+      description: baForm.value.description,
+      path: baForm.value.path,
+      goals: baGoals.value ? baGoals.value.split(',').map(g => g.trim()).filter(Boolean) : [],
+      constraints: baConstraints.value ? baConstraints.value.split(',').map(g => g.trim()).filter(Boolean) : [],
+      assumptions: baAssumptions.value ? baAssumptions.value.split(',').map(g => g.trim()).filter(Boolean) : []
+    })
+    baGenerated.value = cards
+  } catch (error) {
+    baError.value = error.message || 'BA generation failed'
+  } finally {
+    baLoading.value = false
+  }
+}
+
+const saveGenerated = async (c) => {
+  try {
+    await cardStore.createCard({
+      title: c.title,
+      summary: c.summary,
+      priority: c.priority || 'P2',
+      status: 'New',
+      type: 'Requirement',
+      routing: { from_tab: 'Plan', to_tab: 'Plan' }
+    })
+    await cardStore.fetchCards()
+  } catch (error) {
+    console.error('Failed to save generated card', error)
+  }
 }
 
 onMounted(() => {
@@ -179,6 +283,125 @@ onMounted(() => {
   background: rgba(167, 139, 250, 0.08);
   border-radius: 8px;
   border: 1px solid rgba(167, 139, 250, 0.15);
+}
+
+.new-ba-btn {
+  padding: 10px 14px;
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--text-primary);
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.new-ba-btn:hover {
+  border-color: rgba(59, 130, 246, 0.6);
+  background: rgba(59, 130, 246, 0.18);
+}
+
+.ba-panel {
+  padding: 16px;
+  background: rgba(30, 30, 52, 0.4);
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+}
+
+.panel-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.panel-row label {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+}
+
+.panel-row input,
+.panel-row textarea {
+  background: rgba(30, 30, 52, 0.6);
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+}
+
+.panel-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.submit-btn,
+.cancel-btn {
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  background: rgba(167, 139, 250, 0.1);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.submit-btn {
+  border-color: rgba(0, 212, 170, 0.5);
+  background: rgba(0, 212, 170, 0.15);
+}
+
+.submit-btn:hover {
+  background: rgba(0, 212, 170, 0.25);
+}
+
+.cancel-btn:hover {
+  background: rgba(167, 139, 250, 0.18);
+}
+
+.ba-results {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ba-error {
+  color: var(--coral-danger);
+  font-size: 12px;
+  padding: 8px 10px;
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  border-radius: 8px;
+}
+
+.ba-card {
+  background: rgba(13, 13, 30, 0.4);
+  border: 1px solid rgba(167, 139, 250, 0.15);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.ba-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.ba-summary {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 6px 0;
+  white-space: pre-wrap;
+}
+
+.ba-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
 }
 
 .empty-state {

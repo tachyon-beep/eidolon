@@ -42,6 +42,20 @@ class CardMetrics(BaseModel):
     risk: float = Field(default=0.0, ge=0.0, le=1.0, description="Risk score 0-1")
     confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="Confidence score 0-1")
     coverage_impact: float = Field(default=0.0, description="Test coverage impact")
+    grade: Optional[str] = Field(default=None, description="Structured assessment grade (e.g., A/B/C/D/E or GOOD/NEUTRAL/BAD)")
+
+
+class CardIssue(BaseModel):
+    """Structured issue found during analysis; stays on the source card until promoted"""
+    title: str
+    description: str = ""
+    severity: str = "Low"
+    type: str = "review"
+    line_start: Optional[int] = None
+    line_end: Optional[int] = None
+    confidence: Optional[float] = None
+    fix_code: Optional[str] = None
+    promoted: bool = False
 
 
 class CardLogEntry(BaseModel):
@@ -83,6 +97,7 @@ class Card(BaseModel):
     children: List[str] = Field(default_factory=list)
     links: CardLink = Field(default_factory=CardLink)
     metrics: CardMetrics = Field(default_factory=CardMetrics)
+    issues: List[CardIssue] = Field(default_factory=list, description="Structured issues attached to this card")
     log: List[CardLogEntry] = Field(default_factory=list)
     routing: Routing = Field(default_factory=Routing)
     proposed_fix: Optional[ProposedFix] = Field(default=None, description="Proposed code fix")

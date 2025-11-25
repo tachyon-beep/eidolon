@@ -47,6 +47,7 @@ class Database:
                     owner_agent TEXT,
                     parent TEXT,
                     children TEXT,
+                    issues TEXT,
                     links TEXT,
                     metrics TEXT,
                     log TEXT,
@@ -56,6 +57,9 @@ class Database:
                     updated_at TEXT NOT NULL
                 )
             """)
+
+            # Best-effort column add for existing databases
+            await self._ensure_column("cards", "issues", "TEXT")
 
             # Agents table
             await cursor.execute("""
@@ -172,9 +176,9 @@ class Database:
                 await cursor.execute("""
                     INSERT INTO cards (
                         id, type, title, summary, status, priority, owner_agent,
-                        parent, children, links, metrics, log, routing,
+                        parent, children, issues, links, metrics, log, routing,
                         proposed_fix, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     card.id,
                     card.type,
@@ -185,6 +189,7 @@ class Database:
                     card.owner_agent,
                     card.parent,
                     json.dumps(card.children),
+                    json.dumps([issue.model_dump() for issue in card.issues]),
                     json.dumps(card.links.model_dump()),
                     json.dumps(card.metrics.model_dump()),
                     json.dumps([log.model_dump() for log in card.log], default=str),
@@ -247,7 +252,7 @@ class Database:
                 await cursor.execute("""
                     UPDATE cards SET
                         type = ?, title = ?, summary = ?, status = ?, priority = ?,
-                        owner_agent = ?, parent = ?, children = ?, links = ?,
+                        owner_agent = ?, parent = ?, children = ?, issues = ?, links = ?,
                         metrics = ?, log = ?, routing = ?, proposed_fix = ?, updated_at = ?
                     WHERE id = ?
                 """, (
@@ -259,6 +264,7 @@ class Database:
                     card.owner_agent,
                     card.parent,
                     json.dumps(card.children),
+                    json.dumps([issue.model_dump() for issue in card.issues]),
                     json.dumps(card.links.model_dump()),
                     json.dumps(card.metrics.model_dump()),
                     json.dumps([log.model_dump() for log in card.log], default=str),
@@ -380,6 +386,7 @@ class Database:
             owner_agent=row["owner_agent"],
             parent=row["parent"],
             children=json.loads(row["children"]),
+            issues=json.loads(row["issues"]) if row["issues"] else [],
             links=json.loads(row["links"]),
             metrics=json.loads(row["metrics"]),
             log=json.loads(row["log"]),
@@ -388,6 +395,19 @@ class Database:
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"])
         )
+
+    async def _ensure_column(self, table: str, column: str, column_type: str):
+        """Add a column if it doesn't exist (best-effort, ignores failures)"""
+        async with self.db.cursor() as cursor:
+            await cursor.execute(f"PRAGMA table_info({table})")
+            cols = [row[1] for row in await cursor.fetchall()]
+            if column not in cols:
+                try:
+                    await cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
+                    await self.db.commit()
+                except Exception:
+                    # Ignore if cannot add (e.g., duplicate) to avoid breaking startup
+                    pass
 
     def _row_to_agent(self, row: aiosqlite.Row) -> Agent:
         """Convert database row to Agent model"""

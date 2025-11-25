@@ -73,11 +73,24 @@ export const useCardStore = defineStore('cards', () => {
       const index = cards.value.findIndex(c => c.id === cardId)
       if (index !== -1) {
         cards.value[index] = response.data
+      } else {
+        cards.value.push(response.data)
       }
       return response.data
     } catch (error) {
       console.error('Error updating card:', error)
       return null
+    }
+  }
+
+  async function createCard(payload) {
+    try {
+      const response = await axios.post(`${API_BASE}/cards`, payload)
+      cards.value.push(response.data)
+      return response.data
+    } catch (error) {
+      console.error('Error creating card:', error)
+      throw error
     }
   }
 
@@ -96,6 +109,36 @@ export const useCardStore = defineStore('cards', () => {
     } catch (error) {
       console.error('Error applying fix:', error)
       throw error
+    }
+  }
+
+  async function reviewCard(cardId, options) {
+    try {
+      const response = await axios.post(`${API_BASE}/cards/${cardId}/review`, options)
+      await fetchCards()
+      return response.data
+    } catch (error) {
+      console.error('Error reviewing card:', error)
+      throw error
+    }
+  }
+
+  async function generateBAProject(payload) {
+    try {
+      const response = await axios.post(`${API_BASE}/ba/projects`, payload)
+      return response.data.cards || []
+    } catch (error) {
+      let detail = error?.response?.data?.detail
+      if (detail && typeof detail !== 'string') {
+        try {
+          detail = JSON.stringify(detail)
+        } catch {
+          detail = String(detail)
+        }
+      }
+      detail = detail || error.message
+      console.error('Error generating BA project cards:', detail)
+      throw new Error(detail)
     }
   }
 
@@ -149,6 +192,8 @@ export const useCardStore = defineStore('cards', () => {
         const index = cards.value.findIndex(c => c.id === message.data.id)
         if (index !== -1) {
           cards.value[index] = message.data
+        } else {
+          cards.value.push(message.data)
         }
         break
       case 'card_deleted':
@@ -205,13 +250,16 @@ export const useCardStore = defineStore('cards', () => {
     getAgent,
     getAgentHierarchy,
     updateCard,
+    createCard,
     routeCard,
     applyFix,
+    reviewCard,
     analyzeCodebase,
     selectCard,
     clearSelection,
     fetchCacheStats,
     clearCache,
-    handleWebSocketMessage
+    handleWebSocketMessage,
+    generateBAProject
   }
 })
